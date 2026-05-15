@@ -3,7 +3,6 @@
 namespace Database\Seeders;
 
 use App\Models\User;
-// use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
@@ -13,14 +12,14 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // User::factory(10)->create();
+        // Seed shared default categories (user_id = NULL) first so every user inherits them.
+        $this->call(CategorySeeder::class);
 
-        \App\Models\User::factory()->create([
+        User::firstOrCreate(['email' => 'demo@example.com'], [
             'name' => 'Demo User',
-            'email' => 'demo@example.com',
-            'password' => \Hash::make('password'),
+            'password' => bcrypt('password'),
         ]);
 
-        $this->call(CategorySeeder::class);
+        $this->call(DemoDataSeeder::class);
     }
 }

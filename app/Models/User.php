@@ -4,6 +4,7 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
@@ -46,28 +47,33 @@ class User extends Authenticatable
         ];
     }
 
-    public function categories()
+    public function categories(): HasMany
     {
         return $this->hasMany(Category::class);
     }
 
-    public function transactions()
+    public function transactions(): HasMany
     {
         return $this->hasMany(Transaction::class);
     }
 
-    public function budgets()
+    public function budgets(): HasMany
     {
         return $this->hasMany(Budget::class);
     }
 
-    public function allowances()
+    public function allowances(): HasMany
     {
         return $this->hasMany(Allowance::class);
     }
 
-    public function savingsGoals()
+    public function savingsGoals(): HasMany
     {
         return $this->hasMany(SavingsGoal::class);
+    }
+
+    public function loans(): HasMany
+    {
+        return $this->hasMany(Loan::class);
     }
 }

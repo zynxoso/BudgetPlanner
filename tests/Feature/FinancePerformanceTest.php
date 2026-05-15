@@ -146,6 +146,7 @@ class FinancePerformanceTest extends TestCase
             'source' => 'Salary',
             'date' => now()->subDays(2),
             'is_spent' => false,
+            'notes' => 'Monthly salary',
         ]);
 
         Loan::create([

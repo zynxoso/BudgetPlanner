@@ -2,14 +2,17 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
+use App\Http\Requests\Loan\MakeLoanPaymentRequest;
+use App\Http\Requests\Loan\StoreLoanRequest;
 use App\Models\Loan;
-use Inertia\Inertia;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class LoanController extends Controller
 {
-    public function index()
+    public function index(): Response
     {
         $loans = Loan::query()
             ->select(['id', 'name', 'amount', 'remaining_amount', 'interest_rate', 'due_date', 'date_borrowed', 'status'])
@@ -22,15 +25,9 @@ class LoanController extends Controller
         ]);
     }
 
-    public function store(Request $request)
+    public function store(StoreLoanRequest $request): RedirectResponse
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'amount' => 'required|numeric|min:0',
-            'interest_rate' => 'nullable|numeric|min:0',
-            'due_date' => 'nullable|date',
-            'date_borrowed' => 'required|date',
-        ]);
+        $validated = $request->validated();
 
         Loan::create(array_merge($validated, [
             'user_id' => Auth::id(),
@@ -41,35 +38,27 @@ class LoanController extends Controller
         return redirect()->back()->with('success', 'Loan added successfully');
     }
 
-    public function destroy(Loan $loan)
+    public function destroy(Loan $loan): RedirectResponse
     {
-        if ($loan->user_id !== Auth::id()) {
-            abort(403);
-        }
+        $this->authorize('delete', $loan);
 
         $loan->delete();
 
         return redirect()->back()->with('success', 'Loan deleted successfully');
     }
 
-    public function makePayment(Request $request, Loan $loan)
+    public function makePayment(MakeLoanPaymentRequest $request, Loan $loan): RedirectResponse
     {
-        if ($loan->user_id !== Auth::id()) {
-            abort(403);
-        }
+        $this->authorize('update', $loan);
 
-        $validated = $request->validate([
-            'amount' => 'required|numeric|min:0',
+        $payment = (float) $request->validated('amount');
+        $remaining = (float) $loan->remaining_amount;
+        $newRemaining = max(0.0, $remaining - $payment);
+
+        $loan->update([
+            'remaining_amount' => $newRemaining,
+            'status' => $newRemaining <= 0 ? 'paid' : $loan->status,
         ]);
-
-        $loan->decrement('remaining_amount', $validated['amount']);
-
-        if ($loan->remaining_amount <= 0) {
-            $loan->update([
-                'remaining_amount' => 0,
-                'status' => 'paid'
-            ]);
-        }
 
         return redirect()->back()->with('success', 'Payment recorded');
     }

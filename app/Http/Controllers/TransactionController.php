@@ -2,16 +2,19 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
-
-use App\Models\Transaction;
+use App\Http\Requests\Transaction\StoreExpenseRequest;
+use App\Http\Requests\Transaction\StoreIncomeRequest;
+use App\Http\Requests\Transaction\UpdateTransactionRequest;
 use App\Models\Category;
-use Inertia\Inertia;
+use App\Models\Transaction;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class TransactionController extends Controller
 {
-    public function incomeIndex()
+    public function incomeIndex(): Response
     {
         $incomes = Transaction::query()
             ->select(['id', 'amount', 'type', 'source', 'date', 'notes', 'is_spent'])
@@ -21,21 +24,13 @@ class TransactionController extends Controller
             ->get();
 
         return Inertia::render('transactions/income', [
-            'incomes' => $incomes
+            'incomes' => $incomes,
         ]);
     }
 
-    public function storeIncome(Request $request)
+    public function storeIncome(StoreIncomeRequest $request): RedirectResponse
     {
-        $validated = $request->validate([
-            'amount' => 'required|numeric|min:0',
-            'source' => 'required|string|max:255',
-            'date' => 'required|date',
-            'notes' => 'nullable|string',
-            'is_spent' => 'nullable|boolean',
-        ]);
-
-        Transaction::create(array_merge($validated, [
+        Transaction::create(array_merge($request->validated(), [
             'user_id' => Auth::id(),
             'type' => 'income',
         ]));
@@ -43,38 +38,34 @@ class TransactionController extends Controller
         return redirect()->back()->with('success', 'Income added successfully');
     }
 
-    public function expenseIndex()
+    public function expenseIndex(): Response
     {
+        $userId = Auth::id();
+
         $expenses = Transaction::query()
             ->select(['id', 'category_id', 'amount', 'type', 'date', 'notes'])
             ->with('category:id,name')
-            ->where('user_id', Auth::id())
+            ->where('user_id', $userId)
             ->where('type', 'expense')
             ->orderByDesc('date')
             ->get();
 
         $categories = Category::query()
             ->select(['id', 'name'])
-            ->where('user_id', Auth::id())
-            ->orWhereNull('user_id')
+            ->where(function ($query) use ($userId) {
+                $query->where('user_id', $userId)->orWhereNull('user_id');
+            })
             ->get();
 
         return Inertia::render('transactions/expenses', [
             'expenses' => $expenses,
-            'categories' => $categories
+            'categories' => $categories,
         ]);
     }
 
-    public function storeExpense(Request $request)
+    public function storeExpense(StoreExpenseRequest $request): RedirectResponse
     {
-        $validated = $request->validate([
-            'amount' => 'required|numeric|min:0',
-            'category_id' => 'required|exists:categories,id',
-            'date' => 'required|date',
-            'notes' => 'nullable|string',
-        ]);
-
-        Transaction::create(array_merge($validated, [
+        Transaction::create(array_merge($request->validated(), [
             'user_id' => Auth::id(),
             'type' => 'expense',
         ]));
@@ -82,58 +73,42 @@ class TransactionController extends Controller
         return redirect()->back()->with('success', 'Expense added successfully');
     }
 
-    public function allIndex()
+    public function allIndex(): Response
     {
+        $userId = Auth::id();
+
         $transactions = Transaction::query()
             ->select(['id', 'category_id', 'amount', 'type', 'source', 'date', 'notes', 'is_spent'])
             ->with('category:id,name')
-            ->where('user_id', Auth::id())
+            ->where('user_id', $userId)
             ->orderByDesc('date')
             ->paginate(15);
 
         $categories = Category::query()
             ->select(['id', 'name'])
-            ->where('user_id', Auth::id())
-            ->orWhereNull('user_id')
+            ->where(function ($query) use ($userId) {
+                $query->where('user_id', $userId)->orWhereNull('user_id');
+            })
             ->get();
 
         return Inertia::render('transactions/index', [
             'transactions' => $transactions,
-            'categories' => $categories
+            'categories' => $categories,
         ]);
     }
 
-    public function update(Request $request, Transaction $transaction)
+    public function update(UpdateTransactionRequest $request, Transaction $transaction): RedirectResponse
     {
-        if ($transaction->user_id !== Auth::id()) {
-            abort(403);
-        }
+        $this->authorize('update', $transaction);
 
-        $rules = [
-            'amount' => 'required|numeric|min:0',
-            'date' => 'required|date',
-            'notes' => 'nullable|string',
-        ];
-
-        if ($transaction->type === 'income') {
-            $rules['source'] = 'required|string|max:255';
-            $rules['is_spent'] = 'nullable|boolean';
-        } else {
-            $rules['category_id'] = 'required|exists:categories,id';
-        }
-
-        $validated = $request->validate($rules);
-
-        $transaction->update($validated);
+        $transaction->update($request->validated());
 
         return redirect()->back()->with('success', 'Transaction updated successfully');
     }
 
-    public function destroy(Transaction $transaction)
+    public function destroy(Transaction $transaction): RedirectResponse
     {
-        if ($transaction->user_id !== Auth::id()) {
-            abort(403);
-        }
+        $this->authorize('delete', $transaction);
 
         $transaction->delete();
 

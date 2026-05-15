@@ -2,8 +2,9 @@ import AppLayout from '@/layouts/app-layout';
 import { type BreadcrumbItem } from '@/types';
 import { Head, useForm, router, Link } from '@inertiajs/react';
 import { Plus, Trash2, Edit2, Search, Calendar, Landmark, TrendingDown } from 'lucide-react';
-import { useState, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { DeleteConfirmationDialog } from '@/components/delete-confirmation-dialog';
+import { getErrorMessage, postJson } from '@/lib/api';
 import { 
     Select, 
     SelectContent, 
@@ -36,6 +37,23 @@ interface Props {
     categories: Category[];
 }
 
+interface AiCategorizeResponse {
+    status: 'suggested' | 'needs_review' | 'fallback' | 'unavailable';
+    suggestion?: {
+        category_id: number;
+        category_name: string;
+        confidence: number;
+        reason?: string;
+    };
+    message?: string | null;
+}
+
+type AiSuggestionState =
+    | { status: 'idle' }
+    | { status: 'loading' }
+    | { status: 'suggested' | 'needs_review' | 'fallback'; suggestion: NonNullable<AiCategorizeResponse['suggestion']>; message?: string | null }
+    | { status: 'unavailable'; message: string };
+
 export default function ExpensesPage({ expenses, categories }: Props) {
     const now = new Date();
     const [selectedMonth, setSelectedMonth] = useState<string>((now.getMonth() + 1).toString());
@@ -46,6 +64,7 @@ export default function ExpensesPage({ expenses, categories }: Props) {
     const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
     const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
     const [transactionToDelete, setTransactionToDelete] = useState<number | null>(null);
+    const [aiSuggestion, setAiSuggestion] = useState<AiSuggestionState>({ status: 'idle' });
 
     const months = [
         { value: '1', label: 'January' },
@@ -90,8 +109,21 @@ export default function ExpensesPage({ expenses, categories }: Props) {
         notes: '',
     });
 
+    useEffect(() => {
+        if (!isModalOpen) {
+            setAiSuggestion({ status: 'idle' });
+        }
+    }, [isModalOpen]);
+
+    useEffect(() => {
+        if (aiSuggestion.status !== 'loading') {
+            setAiSuggestion({ status: 'idle' });
+        }
+    }, [data.amount, data.notes, data.date]);
+
     const openEditModal = (expense: Expense) => {
         setEditingExpense(expense);
+        setAiSuggestion({ status: 'idle' });
         setData({
             amount: expense.amount,
             category_id: expense.category.id.toString(),
@@ -99,6 +131,53 @@ export default function ExpensesPage({ expenses, categories }: Props) {
             notes: expense.notes || '',
         });
         setIsModalOpen(true);
+    };
+
+    const suggestCategory = async () => {
+        if (!data.amount) {
+            setAiSuggestion({ status: 'unavailable', message: 'Add an amount before requesting a suggestion.' });
+            return;
+        }
+
+        const amountValue = Number(data.amount);
+        if (Number.isNaN(amountValue)) {
+            setAiSuggestion({ status: 'unavailable', message: 'Amount must be a valid number.' });
+            return;
+        }
+
+        setAiSuggestion({ status: 'loading' });
+
+        try {
+            const response = await postJson<AiCategorizeResponse>('/ai/categorize', {
+                amount: amountValue,
+                notes: data.notes,
+                date: data.date,
+            });
+
+            if (response.status === 'unavailable') {
+                setAiSuggestion({
+                    status: 'unavailable',
+                    message: response.message || 'AI is unavailable right now.',
+                });
+                return;
+            }
+
+            if (response.suggestion) {
+                setAiSuggestion({
+                    status: response.status as 'suggested' | 'needs_review' | 'fallback',
+                    suggestion: response.suggestion,
+                    message: response.message ?? null,
+                });
+                return;
+            }
+
+            setAiSuggestion({
+                status: 'unavailable',
+                message: response.message || 'No suggestion available.',
+            });
+        } catch (error) {
+            setAiSuggestion({ status: 'unavailable', message: getErrorMessage(error) });
+        }
     };
 
     const submit = (e: React.FormEvent) => {
@@ -144,7 +223,8 @@ export default function ExpensesPage({ expenses, categories }: Props) {
                         <h2 className="text-2xl font-bold">Expense Management</h2>
                         <p className="text-muted-foreground">Monitor your spending activity</p>
                     </div>
-                    <button 
+                    <button
+                        type="button"
                         onClick={() => setIsModalOpen(true)}
                         className="inline-flex items-center justify-center rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-zinc-800"
                     >
@@ -294,7 +374,17 @@ export default function ExpensesPage({ expenses, categories }: Props) {
                                 {errors.amount && <p className="text-xs text-rose-500 mt-1">{errors.amount}</p>}
                             </div>
                             <div>
-                                <label className="block text-sm font-medium mb-1 text-zinc-700">Category</label>
+                                <div className="mb-1 flex items-center justify-between">
+                                    <label className="block text-sm font-medium text-zinc-700">Category</label>
+                                    <button
+                                        type="button"
+                                        onClick={suggestCategory}
+                                        disabled={aiSuggestion.status === 'loading'}
+                                        className="text-xs font-semibold text-emerald-600 hover:text-emerald-700 disabled:opacity-60"
+                                    >
+                                        {aiSuggestion.status === 'loading' ? 'Suggesting...' : 'Suggest with AI'}
+                                    </button>
+                                </div>
                                 <select 
                                     className="w-full rounded-md border border-zinc-200 bg-white p-2 text-zinc-900"
                                     value={data.category_id}
@@ -307,6 +397,29 @@ export default function ExpensesPage({ expenses, categories }: Props) {
                                     ))}
                                 </select>
                                 {errors.category_id && <p className="text-xs text-rose-500 mt-1">{errors.category_id}</p>}
+                                {aiSuggestion.status === 'unavailable' && (
+                                    <p className="mt-2 text-xs text-amber-600">{aiSuggestion.message}</p>
+                                )}
+                                {(aiSuggestion.status === 'suggested' || aiSuggestion.status === 'needs_review' || aiSuggestion.status === 'fallback') && (
+                                    <div className="mt-2 rounded-md border bg-emerald-50/40 p-2 text-xs text-emerald-900">
+                                        <p>
+                                            Suggested: <span className="font-semibold">{aiSuggestion.suggestion.category_name}</span> ({Math.round(aiSuggestion.suggestion.confidence * 100)}% confidence)
+                                        </p>
+                                        {aiSuggestion.suggestion.reason && (
+                                            <p className="mt-1 text-[11px] text-emerald-700">{aiSuggestion.suggestion.reason}</p>
+                                        )}
+                                        {aiSuggestion.message && (
+                                            <p className="mt-1 text-[11px] text-amber-700">{aiSuggestion.message}</p>
+                                        )}
+                                        <button
+                                            type="button"
+                                            onClick={() => setData('category_id', aiSuggestion.suggestion.category_id.toString())}
+                                            className="mt-2 rounded-md bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                                        >
+                                            Use suggestion
+                                        </button>
+                                    </div>
+                                )}
                             </div>
                             <div>
                                 <label className="block text-sm font-medium mb-1 text-zinc-700">Date</label>

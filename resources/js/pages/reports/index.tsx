@@ -2,8 +2,9 @@ import AppLayout from '@/layouts/app-layout';
 import { type BreadcrumbItem } from '@/types';
 import { Head } from '@inertiajs/react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
-import { Download } from 'lucide-react';
-import { useMemo } from 'react';
+import { Download, Sparkles } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { getErrorMessage, postJson } from '@/lib/api';
 
 const breadcrumbs: BreadcrumbItem[] = [
     { title: 'Dashboard', href: '/dashboard' },
@@ -40,6 +41,12 @@ interface Props {
     savingsSummary: SavingsSummary;
 }
 
+interface AiInsightsResponse {
+    status: 'ok' | 'fallback' | 'unavailable';
+    insights?: string[];
+    message?: string | null;
+}
+
 const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 const currencyFormatter = new Intl.NumberFormat('en-PH', {
     style: 'currency',
@@ -54,6 +61,9 @@ export default function ReportsPage({
     savingsSummary = { total_target: 0, total_current: 0, total_needed: 0 } 
 }: Props) {
     const formatCurrency = (amount: number) => currencyFormatter.format(amount);
+    const [aiInsights, setAiInsights] = useState<string[]>([]);
+    const [aiLoading, setAiLoading] = useState(false);
+    const [aiNotice, setAiNotice] = useState<string | null>(null);
 
     const loanStatusData = useMemo(
         () => [
@@ -70,6 +80,32 @@ export default function ReportsPage({
         ],
         [savingsSummary.total_current, savingsSummary.total_needed],
     );
+
+    const loadInsights = async () => {
+        if (aiLoading) {
+            return;
+        }
+
+        setAiLoading(true);
+        setAiNotice(null);
+
+        try {
+            const response = await postJson<AiInsightsResponse>('/ai/insights', {});
+            if (Array.isArray(response.insights)) {
+                setAiInsights(response.insights);
+            } else {
+                setAiInsights([]);
+            }
+
+            if (response.status !== 'ok') {
+                setAiNotice(response.message || 'AI is unavailable. Showing fallback insights when possible.');
+            }
+        } catch (error) {
+            setAiNotice(getErrorMessage(error));
+        } finally {
+            setAiLoading(false);
+        }
+    };
 
     return (
         <AppLayout breadcrumbs={breadcrumbs}>
@@ -218,6 +254,39 @@ export default function ReportsPage({
                                 </div>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <div className="mt-6 rounded-xl border bg-card p-6 shadow-sm">
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <Sparkles className="h-4 w-4 text-emerald-500" />
+                            <h3 className="font-bold">AI Insights</h3>
+                        </div>
+                        <button
+                            onClick={loadInsights}
+                            disabled={aiLoading}
+                            className="inline-flex items-center gap-2 rounded-md border bg-card px-3 py-2 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-50"
+                        >
+                            {aiLoading ? 'Generating...' : 'Generate Insights'}
+                        </button>
+                    </div>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                        AI highlights based on your latest report data.
+                    </p>
+                    {aiNotice && <p className="mt-2 text-xs text-amber-600">{aiNotice}</p>}
+                    <div className="mt-4 space-y-3">
+                        {aiInsights.length > 0 ? (
+                            aiInsights.map((insight, index) => (
+                                <div key={index} className="rounded-lg border bg-muted/10 p-3 text-sm">
+                                    {insight}
+                                </div>
+                            ))
+                        ) : (
+                            <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                                No AI insights generated yet.
+                            </div>
+                        )}
                     </div>
                 </div>
 

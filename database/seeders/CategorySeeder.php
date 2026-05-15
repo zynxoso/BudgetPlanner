@@ -2,17 +2,20 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
+use App\Models\Category;
 use Illuminate\Database\Seeder;
 
 class CategorySeeder extends Seeder
 {
     /**
      * Run the database seeds.
+     *
+     * Default categories use user_id = NULL so every user sees them.
+     * Users can create their own categories on top of these.
      */
     public function run(): void
     {
-        $categories = [
+        $defaults = [
             ['name' => 'Food', 'icon' => 'Utensils', 'color' => '#f87171'],
             ['name' => 'Transport', 'icon' => 'Bus', 'color' => '#60a5fa'],
             ['name' => 'School', 'icon' => 'GraduationCap', 'color' => '#fbbf24'],
@@ -21,8 +24,11 @@ class CategorySeeder extends Seeder
             ['name' => 'Others', 'icon' => 'MoreHorizontal', 'color' => '#9ca3af'],
         ];
 
-        foreach ($categories as $category) {
-            \App\Models\Category::create(array_merge($category, ['user_id' => 1]));
+        foreach ($defaults as $attributes) {
+            Category::firstOrCreate(
+                ['user_id' => null, 'name' => $attributes['name']],
+                $attributes
+            );
         }
     }
 }

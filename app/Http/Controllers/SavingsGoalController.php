@@ -2,62 +2,52 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
-
+use App\Http\Requests\SavingsGoal\AddSavingsGoalAmountRequest;
+use App\Http\Requests\SavingsGoal\StoreSavingsGoalRequest;
 use App\Models\SavingsGoal;
-use Inertia\Inertia;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class SavingsGoalController extends Controller
 {
-    public function index()
+    public function index(): Response
     {
         $goals = SavingsGoal::query()
             ->select(['id', 'name', 'target_amount', 'current_amount', 'deadline'])
             ->where('user_id', Auth::id())
             ->orderBy('deadline', 'asc')
             ->get();
-            
+
         return Inertia::render('savings-goals/index', [
             'goals' => $goals,
         ]);
     }
 
-    public function store(Request $request)
+    public function store(StoreSavingsGoalRequest $request): RedirectResponse
     {
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'target_amount' => 'required|numeric|min:0',
-            'deadline' => 'required|date|after:today',
-        ]);
-
-        SavingsGoal::create([
+        SavingsGoal::create(array_merge($request->validated(), [
             'user_id' => Auth::id(),
-            'name' => $validated['name'],
-            'target_amount' => $validated['target_amount'],
             'current_amount' => 0,
-            'deadline' => $validated['deadline'],
-        ]);
+        ]));
 
         return redirect()->back()->with('success', 'Savings goal created successfully');
     }
 
-    public function updateAddAmount(Request $request, SavingsGoal $savingsGoal)
+    public function updateAddAmount(AddSavingsGoalAmountRequest $request, SavingsGoal $savingsGoal): RedirectResponse
     {
-        $validated = $request->validate([
-            'amount' => 'required|numeric|min:0',
-        ]);
+        // CRITICAL: this previously had no ownership check — fixed by policy authorization.
+        $this->authorize('update', $savingsGoal);
 
-        $savingsGoal->increment('current_amount', $validated['amount']);
+        $savingsGoal->increment('current_amount', (float) $request->validated('amount'));
 
         return redirect()->back()->with('success', 'Goal progress updated');
     }
 
-    public function destroy(SavingsGoal $savingsGoal)
+    public function destroy(SavingsGoal $savingsGoal): RedirectResponse
     {
-        if ($savingsGoal->user_id !== Auth::id()) {
-            abort(403);
-        }
+        $this->authorize('delete', $savingsGoal);
 
         $savingsGoal->delete();
 

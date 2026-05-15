@@ -10,7 +10,9 @@ import {
     ArrowRight,
     HandCoins,
     BadgePercent,
-    Target
+    Target,
+    Sparkles,
+    Send
 } from 'lucide-react';
 import { 
     BarChart, 
@@ -23,7 +25,8 @@ import {
     AreaChart,
     Area
 } from 'recharts';
-import { memo } from 'react';
+import { memo, useState } from 'react';
+import { getErrorMessage, postJson } from '@/lib/api';
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
@@ -48,6 +51,7 @@ interface DashboardProps {
         currentBalance: number;
         totalIncome: number;
         totalExpenses: number;
+        spentIncome?: number;
         remainingBudget: number;
         totalAllowances: number;
         totalLoansOutstanding: number;
@@ -66,6 +70,19 @@ const currencyFormatter = new Intl.NumberFormat('en-PH', {
 type SpendingChartPoint = DashboardProps['spendingChart'][number];
 type TopCategory = DashboardProps['topCategories'][number];
 type RecentTransaction = DashboardProps['recentTransactions'][number];
+
+type AiRole = 'user' | 'assistant';
+
+interface AiMessage {
+    role: AiRole;
+    content: string;
+}
+
+interface AiChatResponse {
+    status: 'ok' | 'fallback' | 'unavailable';
+    reply?: string;
+    message?: string | null;
+}
 
 const ActivityChart = memo(function ActivityChart({ spendingChart }: { spendingChart: SpendingChartPoint[] }) {
     return (
@@ -186,6 +203,148 @@ const RecentTransactionsTable = memo(function RecentTransactionsTable({ recentTr
     );
 });
 
+const AiAssistantCard = memo(function AiAssistantCard() {
+    const [messages, setMessages] = useState<AiMessage[]>([]);
+    const [input, setInput] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [notice, setNotice] = useState<string | null>(null);
+
+    const quickPrompts = [
+        'Where can I cut expenses this month?',
+        'What is a safe weekly spending limit?',
+        'Summarize my biggest money drains.',
+        'Suggest a small savings goal for next month.',
+    ];
+
+    const sendMessage = async (content: string) => {
+        const trimmed = content.trim();
+        if (!trimmed || loading) {
+            return;
+        }
+
+        setNotice(null);
+        setLoading(true);
+
+        const history = messages.slice(-6);
+        const nextHistory = [...history, { role: 'user', content: trimmed }];
+
+        setMessages((prev) => [...prev, { role: 'user', content: trimmed }]);
+        setInput('');
+
+        try {
+            const response = await postJson<AiChatResponse>('/ai/chat', {
+                message: trimmed,
+                history: nextHistory,
+            });
+
+            if (response.reply) {
+                setMessages((prev) => [...prev, { role: 'assistant', content: response.reply }]);
+            }
+
+            if (response.status !== 'ok') {
+                setNotice(response.message || 'AI is unavailable right now.');
+            }
+        } catch (error) {
+            setNotice(getErrorMessage(error));
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="rounded-xl border bg-card p-6 shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-foreground">
+                        <Sparkles className="h-5 w-5" />
+                    </div>
+                    <div>
+                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">AI Co-Pilot</p>
+                        <h3 className="text-lg font-semibold text-foreground">Plan today, spend with intent</h3>
+                    </div>
+                </div>
+                <span className="inline-flex items-center rounded-full border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground">Beta</span>
+            </div>
+
+            <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_0.9fr]">
+                <div className="space-y-3">
+                    <div className="min-h-[140px] max-h-64 space-y-3 overflow-y-auto rounded-xl border border-border bg-background p-4">
+                        {messages.length === 0 && (
+                            <p className="text-sm text-muted-foreground">No messages yet. Try asking "Where can I cut expenses this month?"</p>
+                        )}
+                        {messages.map((message, index) => (
+                            <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                <div
+                                    className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+                                        message.role === 'user'
+                                            ? 'bg-primary text-primary-foreground'
+                                            : 'border border-border bg-muted text-foreground'
+                                    }`}
+                                >
+                                    {message.content}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {notice && <p className="text-xs text-destructive">{notice}</p>}
+
+                    <form
+                        onSubmit={(event) => {
+                            event.preventDefault();
+                            sendMessage(input);
+                        }}
+                        className="flex flex-col gap-3 sm:flex-row sm:items-center"
+                    >
+                        <input
+                            type="text"
+                            value={input}
+                            onChange={(event) => setInput(event.target.value)}
+                            placeholder="Ask about spending, budgets, or goals..."
+                            className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                        />
+                        <button
+                            type="submit"
+                            disabled={loading || input.trim().length === 0}
+                            className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+                        >
+                            {loading ? 'Sending...' : 'Send'}
+                            <Send className="h-4 w-4" />
+                        </button>
+                    </form>
+                </div>
+
+                <div className="space-y-4">
+                    <div className="rounded-xl border border-border bg-muted/40 p-4">
+                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Quick prompts</p>
+                        <div className="mt-3 grid gap-2">
+                            {quickPrompts.map((prompt) => (
+                                <button
+                                    key={prompt}
+                                    type="button"
+                                    onClick={() => setInput(prompt)}
+                                    className="rounded-lg border border-border bg-background px-3 py-2 text-left text-xs text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+                                >
+                                    {prompt}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="rounded-xl border border-border bg-background p-4">
+                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">What I can do</p>
+                        <div className="mt-3 space-y-2 text-sm text-foreground">
+                            <p>Spot overspending patterns across categories.</p>
+                            <p>Suggest realistic saving goals based on activity.</p>
+                            <p>Explain changes in balance and budget drift.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+});
+
 export default function Dashboard({ summary, recentTransactions, spendingChart, topCategories }: DashboardProps) {
     const formatCurrency = (amount: number) => currencyFormatter.format(amount);
 
@@ -214,6 +373,8 @@ export default function Dashboard({ summary, recentTransactions, spendingChart, 
                         </Link>
                     </div>
                 </div>
+
+                <AiAssistantCard />
 
                 {/* Summary Cards */}
                 <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

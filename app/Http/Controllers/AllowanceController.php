@@ -2,15 +2,17 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
-
+use App\Http\Requests\Allowance\StoreAllowanceRequest;
+use App\Http\Requests\Allowance\UpdateAllowanceRequest;
 use App\Models\Allowance;
-use Inertia\Inertia;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class AllowanceController extends Controller
 {
-    public function index()
+    public function index(): Response
     {
         $allowances = Allowance::query()
             ->select(['id', 'amount', 'frequency'])
@@ -22,43 +24,27 @@ class AllowanceController extends Controller
         ]);
     }
 
-    public function store(Request $request)
+    public function store(StoreAllowanceRequest $request): RedirectResponse
     {
-        $validated = $request->validate([
-            'amount' => 'required|numeric|min:0',
-            'frequency' => 'required|string|in:daily,weekly,monthly,yearly',
-        ]);
-
-        Allowance::create([
+        Allowance::create(array_merge($request->validated(), [
             'user_id' => Auth::id(),
-            'amount' => $validated['amount'],
-            'frequency' => $validated['frequency'],
-        ]);
+        ]));
 
         return redirect()->back()->with('success', 'Allowance created successfully');
     }
 
-    public function update(Request $request, Allowance $allowance)
+    public function update(UpdateAllowanceRequest $request, Allowance $allowance): RedirectResponse
     {
-        if ($allowance->user_id !== Auth::id()) {
-            abort(403);
-        }
+        $this->authorize('update', $allowance);
 
-        $validated = $request->validate([
-            'amount' => 'required|numeric|min:0',
-            'frequency' => 'required|string|in:daily,weekly,monthly,yearly',
-        ]);
-
-        $allowance->update($validated);
+        $allowance->update($request->validated());
 
         return redirect()->back()->with('success', 'Allowance updated successfully');
     }
 
-    public function destroy(Allowance $allowance)
+    public function destroy(Allowance $allowance): RedirectResponse
     {
-        if ($allowance->user_id !== Auth::id()) {
-            abort(403);
-        }
+        $this->authorize('delete', $allowance);
 
         $allowance->delete();
 

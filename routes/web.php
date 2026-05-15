@@ -11,6 +11,7 @@ use App\Http\Controllers\AllowanceController;
 use App\Http\Controllers\SavingsGoalController;
 use App\Http\Controllers\LoanController;
 use App\Http\Controllers\ReportsController;
+use App\Http\Controllers\AiController;
 
 Route::get('/', [DashboardController::class, 'index'])
     ->middleware(['auth'])
@@ -48,6 +49,10 @@ Route::middleware(['auth'])->group(function () {
     Route::put('transactions/{transaction}', [TransactionController::class, 'update'])->name('transactions.update');
     
     Route::get('reports', [ReportsController::class, 'index'])->name('reports.index');
+
+    Route::post('ai/chat', [AiController::class, 'chat'])->name('ai.chat');
+    Route::post('ai/insights', [AiController::class, 'insights'])->name('ai.insights');
+    Route::post('ai/categorize', [AiController::class, 'categorize'])->name('ai.categorize');
 });
 
 require __DIR__.'/settings.php';

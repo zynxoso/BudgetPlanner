@@ -2,26 +2,28 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
-
+use App\Http\Requests\Budget\StoreBudgetRequest;
 use App\Models\Budget;
 use App\Models\Category;
 use App\Models\Transaction;
-use Inertia\Inertia;
-use Illuminate\Support\Facades\Auth;
 use Carbon\Carbon;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Support\Facades\Auth;
+use Inertia\Inertia;
+use Inertia\Response;
 
 class BudgetController extends Controller
 {
-    public function index()
+    public function index(): Response
     {
         $now = Carbon::now();
         $userId = Auth::id();
 
         $categories = Category::query()
             ->select(['id', 'name', 'icon', 'color'])
-            ->where('user_id', $userId)
-            ->orWhereNull('user_id')
+            ->where(function ($query) use ($userId) {
+                $query->where('user_id', $userId)->orWhereNull('user_id');
+            })
             ->get();
 
         $budgets = Budget::query()
@@ -42,7 +44,7 @@ class BudgetController extends Controller
 
         $budgetData = $categories->map(function ($category) use ($budgets, $usedByCategory) {
             $budget = $budgets->get($category->id);
-            $limit = $budget ? (float)$budget->amount_limit : 0;
+            $limit = $budget ? (float) $budget->amount_limit : 0.0;
             $used = (float) ($usedByCategory->get($category->id) ?? 0);
 
             return [
@@ -51,25 +53,21 @@ class BudgetController extends Controller
                 'icon' => $category->icon,
                 'color' => $category->color,
                 'limit' => $limit,
-                'used' => (float)$used,
-                'remaining' => $limit - (float)$used,
-                'percentage' => $limit > 0 ? ((float)$used / $limit) * 100 : 0,
+                'used' => $used,
+                'remaining' => $limit - $used,
+                'percentage' => $limit > 0 ? ($used / $limit) * 100 : 0,
             ];
         });
 
         return Inertia::render('budget/index', [
             'budgetData' => $budgetData,
-            'currentMonth' => $now->format('F Y')
+            'currentMonth' => $now->format('F Y'),
         ]);
     }
 
-    public function updateOrCreate(Request $request)
+    public function updateOrCreate(StoreBudgetRequest $request): RedirectResponse
     {
-        $validated = $request->validate([
-            'category_id' => 'required|exists:categories,id',
-            'amount_limit' => 'required|numeric|min:0',
-        ]);
-
+        $validated = $request->validated();
         $now = Carbon::now();
 
         Budget::updateOrCreate(
