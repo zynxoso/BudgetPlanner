@@ -8,13 +8,17 @@ use App\Models\Loan;
 use App\Models\SavingsGoal;
 use App\Models\Transaction;
 use App\Models\User;
+use App\Services\FinanceSummaryService;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 
 class AiService
 {
-    public function __construct(private readonly GeminiClient $client)
-    {
+    public function __construct(
+        private readonly GeminiClient $client,
+        private readonly FinanceSummaryService $financeSummary
+    ) {
     }
 
     public function chat(User $user, string $message, array $history = []): array
@@ -22,23 +26,30 @@ class AiService
         $summary = $this->buildSummary($user);
 
         $system = implode("\n", [
-            'You are a budgeting assistant inside a personal finance app.',
+            'You are a budgeting assistant inside a personal finance app for the Philippines.',
+            'The currency is Philippine Peso (₱ / PHP). Always format monetary amounts with the ₱ symbol (e.g. ₱1,200.00, ₱51,900). Never use $ or USD.',
             'Use only the provided context. If data is missing, say so.',
             'Write in a blunt, direct, no-fluff tone. Short sentences.',
             'Be ethical and avoid harm.',
             'Avoid legal, tax, or investment advice. Provide informational guidance only.',
             'Do not claim compliance or certification with any standard.',
             'If referencing standards, keep it general and avoid promises.',
-            'Output plain text only. No markdown, no bullets, no asterisks.',
-            'Always respond in two parts:',
-            'Summary: one sentence.',
-            'Actions: 1. ... 2. ... 3. ... (numbered, short, direct).',
+            'Output clean plain text with organized spacing and line breaks.',
+            'Always respond in two sections:',
+            'Summary: [one clear sentence summarizing the status]',
+            '',
+            'Actions:',
+            '1. [Action 1]',
+            '2. [Action 2]',
+            '3. [Action 3]',
             'If helpful, prefix actions with a short label like "Expense cut:".',
             'Do not request secrets, passwords, or API keys.',
         ]);
 
-        $contents = $this->buildHistoryContents($history);
+        // Sliding window of last 4 turns (2 user, 2 assistant) to minimize context token usage
+        $contents = $this->buildHistoryContents(array_slice($history, -4));
         $contextText = $this->formatContext([
+            'currency' => 'PHP (₱)',
             'summary' => $summary,
         ]);
 
@@ -51,7 +62,7 @@ class AiService
 
         $result = $this->client->generate($contents, [
             'temperature' => 0.4,
-            'max_output_tokens' => 450,
+            'max_output_tokens' => 350,
             'system_instruction' => $system,
         ]);
 
@@ -72,8 +83,19 @@ class AiService
         $summary = $this->buildSummary($user);
         $reports = $this->buildReportsContext($user);
 
+        $contextHash = md5(serialize($summary).serialize($reports));
+        $cacheKey = "finance:{$user->id}:ai_insights:{$contextHash}";
+
+        return Cache::remember($cacheKey, now()->addHours(6), function () use ($user, $summary, $reports) {
+            return $this->generateInsights($user, $summary, $reports);
+        });
+    }
+
+    private function generateInsights(User $user, array $summary, array $reports): array
+    {
         $system = implode("\n", [
-            'You are a financial insights assistant.',
+            'You are a financial insights assistant for the Philippines.',
+            'The currency is Philippine Peso (₱ / PHP). Always format currency amounts with the ₱ symbol (e.g. ₱1,200). Never use $ or USD.',
             'Return JSON only in the format: {"insights":["..."]}.',
             'Each insight must be <= 20 words and based only on provided data.',
             'If data is insufficient, include a single insight explaining that.',
@@ -83,14 +105,14 @@ class AiService
             [
                 'role' => 'user',
                 'parts' => [
-                    ['text' => $this->formatContext(['summary' => $summary, 'reports' => $reports])],
+                    ['text' => $this->formatContext(['currency' => 'PHP (₱)', 'summary' => $summary, 'reports' => $reports])],
                 ],
             ],
         ];
 
         $result = $this->client->generate($contents, [
             'temperature' => 0.3,
-            'max_output_tokens' => 320,
+            'max_output_tokens' => 250,
             'response_mime_type' => 'application/json',
             'system_instruction' => $system,
         ]);
@@ -108,7 +130,7 @@ class AiService
 
         $cleanInsights = collect($insights)
             ->filter(fn ($item) => is_string($item) && trim($item) !== '')
-            ->map(fn ($item) => trim($item))
+            ->map(fn ($item) => preg_replace('/\$(\d)/', '₱$1', trim($item)))
             ->values()
             ->all();
 
@@ -128,8 +150,10 @@ class AiService
     {
         $categories = Category::query()
             ->select(['id', 'name'])
-            ->where('user_id', $user->id)
-            ->orWhereNull('user_id')
+            ->where(function ($query) use ($user) {
+                $query->where('user_id', $user->id)
+                    ->orWhereNull('user_id');
+            })
             ->orderBy('name')
             ->get();
 
@@ -139,6 +163,12 @@ class AiService
                 'message' => 'No categories available yet. Please create a category first.',
                 'fallback' => true,
             ];
+        }
+
+        // Fast rule-based categorization before external LLM call
+        $fastMatch = $this->matchFastCategory($user, $categories, $payload);
+        if ($fastMatch !== null) {
+            return $fastMatch;
         }
 
         $system = implode("\n", [
@@ -170,9 +200,12 @@ class AiService
             ],
         ];
 
+        // Model tiering: Use lightweight/fast model with tightened token cap for simple classification
+        $liteModel = config('services.gemini.model_lite') ?: config('services.gemini.model');
         $result = $this->client->generate($contents, [
+            'model' => $liteModel,
             'temperature' => 0.2,
-            'max_output_tokens' => 200,
+            'max_output_tokens' => 100,
             'response_mime_type' => 'application/json',
             'system_instruction' => $system,
         ]);
@@ -210,141 +243,194 @@ class AiService
         ];
     }
 
-    private function buildSummary(User $user): array
-    {
-        $userId = $user->id;
+    private const MERCHANT_CATEGORY_MAP = [
+        // Food & Fast Food
+        'jollibee' => ['Food', 'Dining', 'Fast Food', 'Meals'],
+        'mcdo' => ['Food', 'Dining', 'Fast Food', 'Meals'],
+        'mcdonald' => ['Food', 'Dining', 'Fast Food', 'Meals'],
+        'chowking' => ['Food', 'Dining', 'Fast Food', 'Meals'],
+        'mang inasal' => ['Food', 'Dining', 'Fast Food', 'Meals'],
+        'kfc' => ['Food', 'Dining', 'Fast Food', 'Meals'],
+        'greenwich' => ['Food', 'Dining', 'Fast Food', 'Meals'],
+        'starbucks' => ['Coffee', 'Food', 'Beverage', 'Dining', 'Snacks'],
+        'foodpanda' => ['Food', 'Delivery', 'Dining'],
+        'grabfood' => ['Food', 'Delivery', 'Dining'],
 
-        $transactionTotals = Transaction::query()
-            ->ownedBy($userId)
-            ->selectRaw("COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) as total_income")
-            ->selectRaw("COALESCE(SUM(CASE WHEN type = 'income' AND is_spent = 1 THEN amount ELSE 0 END), 0) as spent_income")
-            ->selectRaw("COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0) as total_expenses")
+        // Groceries & Supermarkets
+        'puregold' => ['Groceries', 'Food', 'Supermarket', 'Supplies'],
+        'sm supermarket' => ['Groceries', 'Food', 'Shopping'],
+        'sm hypermarket' => ['Groceries', 'Food', 'Shopping'],
+        'robinsons supermarket' => ['Groceries', 'Food', 'Shopping'],
+        'waltermart' => ['Groceries', 'Food', 'Shopping'],
+        'landers' => ['Groceries', 'Food', 'Shopping'],
+        'snr' => ['Groceries', 'Food', 'Shopping'],
+        's&r' => ['Groceries', 'Food', 'Shopping'],
+        '7-eleven' => ['Snacks', 'Food', 'Groceries', 'Convenience'],
+        '7eleven' => ['Snacks', 'Food', 'Groceries', 'Convenience'],
+        'uncle john' => ['Snacks', 'Food', 'Groceries'],
+
+        // Utilities & Telecom
+        'meralco' => ['Utilities', 'Electricity', 'Bills', 'Housing'],
+        'maynilad' => ['Utilities', 'Water', 'Bills', 'Housing'],
+        'manila water' => ['Utilities', 'Water', 'Bills', 'Housing'],
+        'pldt' => ['Utilities', 'Internet', 'Bills', 'Telecom'],
+        'converge' => ['Utilities', 'Internet', 'Bills', 'Telecom'],
+        'globe' => ['Utilities', 'Internet', 'Bills', 'Phone', 'Telecom'],
+        'smart' => ['Utilities', 'Internet', 'Bills', 'Phone', 'Telecom'],
+        'dito' => ['Utilities', 'Internet', 'Bills', 'Phone', 'Telecom'],
+
+        // Transportation & Fuel
+        'shell' => ['Transportation', 'Gas', 'Fuel', 'Auto'],
+        'petron' => ['Transportation', 'Gas', 'Fuel', 'Auto'],
+        'caltex' => ['Transportation', 'Gas', 'Fuel', 'Auto'],
+        'seaoil' => ['Transportation', 'Gas', 'Fuel', 'Auto'],
+        'cleanfuel' => ['Transportation', 'Gas', 'Fuel', 'Auto'],
+        'grab' => ['Transportation', 'Travel', 'Commute'],
+        'angkas' => ['Transportation', 'Travel', 'Commute'],
+        'joyride' => ['Transportation', 'Travel', 'Commute'],
+        'move it' => ['Transportation', 'Travel', 'Commute'],
+        'lrt' => ['Transportation', 'Travel', 'Commute'],
+        'mrt' => ['Transportation', 'Travel', 'Commute'],
+        'easytrip' => ['Transportation', 'Toll', 'Auto'],
+        'autosweep' => ['Transportation', 'Toll', 'Auto'],
+
+        // Shopping & Retail
+        'shopee' => ['Shopping', 'Online Shopping', 'Personal', 'Retail'],
+        'lazada' => ['Shopping', 'Online Shopping', 'Personal', 'Retail'],
+        'tiktok shop' => ['Shopping', 'Online Shopping', 'Personal'],
+        'zalora' => ['Shopping', 'Clothing', 'Fashion'],
+        'uniqlo' => ['Shopping', 'Clothing', 'Fashion'],
+        'sm store' => ['Shopping', 'Department Store', 'Clothing'],
+
+        // Healthcare & Pharmacy
+        'mercury drug' => ['Healthcare', 'Medicine', 'Medical', 'Health'],
+        'watsons' => ['Healthcare', 'Personal Care', 'Medicine', 'Beauty'],
+        'generika' => ['Healthcare', 'Medicine', 'Medical'],
+
+        // Subscriptions & Streaming
+        'netflix' => ['Entertainment', 'Subscriptions', 'Media', 'Streaming'],
+        'spotify' => ['Entertainment', 'Subscriptions', 'Music', 'Streaming'],
+        'youtube premium' => ['Entertainment', 'Subscriptions', 'Streaming'],
+        'disney' => ['Entertainment', 'Subscriptions', 'Streaming'],
+        'hbo' => ['Entertainment', 'Subscriptions', 'Streaming'],
+    ];
+
+    private function matchFastCategory(User $user, Collection $categories, array $payload): ?array
+    {
+        $notes = is_string($payload['notes'] ?? null) ? trim($payload['notes']) : '';
+        if ($notes === '') {
+            return null;
+        }
+
+        // 1. History Match: Check if user previously categorized an expense with the same note/merchant
+        $historyCategoryMatch = Transaction::query()
+            ->ownedBy($user->id)
+            ->ofType('expense')
+            ->whereNotNull('category_id')
+            ->whereRaw('LOWER(notes) = ?', [mb_strtolower($notes)])
+            ->selectRaw('category_id, COUNT(*) as match_count')
+            ->groupBy('category_id')
+            ->orderByDesc('match_count')
             ->first();
 
-        $totalIncome = (float) $transactionTotals->total_income;
-        $spentIncome = (float) $transactionTotals->spent_income;
-        $totalExpenses = (float) $transactionTotals->total_expenses;
-        $effectiveExpenses = $totalExpenses + $spentIncome;
-        $currentBalance = $totalIncome - $effectiveExpenses;
-
-        $now = Carbon::now();
-        $totalMonthlyBudget = (float) $user->budgets()
-            ->where('month', $now->month)
-            ->where('year', $now->year)
-            ->sum('amount_limit');
-
-        $monthlyExpenses = (float) Transaction::query()
-            ->ownedBy($userId)
-            ->ofType('expense')
-            ->whereMonth('date', $now->month)
-            ->whereYear('date', $now->year)
-            ->sum('amount');
-
-        $remainingBudget = $totalMonthlyBudget - $monthlyExpenses;
-
-        $topCategories = Transaction::query()
-            ->ownedBy($userId)
-            ->ofType('expense')
-            ->whereMonth('date', $now->month)
-            ->whereYear('date', $now->year)
-            ->selectRaw('category_id, sum(amount) as total')
-            ->groupBy('category_id')
-            ->with('category:id,name')
-            ->orderByDesc('total')
-            ->limit(3)
-            ->get()
-            ->map(function ($item) use ($totalMonthlyBudget) {
+        if ($historyCategoryMatch) {
+            $category = $categories->firstWhere('id', (int) $historyCategoryMatch->category_id);
+            if ($category) {
                 return [
-                    'name' => $item->category->name ?? 'Uncategorized',
-                    'percentage' => $totalMonthlyBudget > 0 ? ($item->total / $totalMonthlyBudget) * 100 : 0,
-                    'amount' => (float) $item->total,
+                    'status' => 'suggested',
+                    'suggestion' => [
+                        'category_id' => $category->id,
+                        'category_name' => $category->name,
+                        'confidence' => 0.95,
+                        'reason' => 'Matched from your transaction history.',
+                    ],
+                    'message' => null,
+                    'fallback' => false,
+                    'meta' => [
+                        'model' => 'history_match',
+                        'latency_ms' => 0,
+                    ],
                 ];
-            })
-            ->values()
-            ->all();
+            }
+        }
 
-        return [
-            'current_balance' => $currentBalance,
-            'total_income' => $totalIncome,
-            'total_expenses' => $effectiveExpenses,
-            'remaining_budget' => $remainingBudget,
-            'top_categories' => $topCategories,
-            'total_savings' => (float) SavingsGoal::where('user_id', $userId)->sum('current_amount'),
-            'total_loans_outstanding' => (float) Loan::where('user_id', $userId)->sum('remaining_amount'),
-            'total_allowances' => (float) Allowance::where('user_id', $userId)->sum('amount'),
-        ];
+        // 2. Keyword Match: Check if note contains any exact category name keyword
+        foreach ($categories as $category) {
+            if (stripos($notes, (string) $category->name) !== false) {
+                return [
+                    'status' => 'suggested',
+                    'suggestion' => [
+                        'category_id' => $category->id,
+                        'category_name' => $category->name,
+                        'confidence' => 0.90,
+                        'reason' => "Keyword matched with '{$category->name}'.",
+                    ],
+                    'message' => null,
+                    'fallback' => false,
+                    'meta' => [
+                        'model' => 'keyword_match',
+                        'latency_ms' => 0,
+                    ],
+                ];
+            }
+        }
+
+        // 3. Philippine Merchant / Utility Dictionary Match (0ms, 0 API Calls)
+        $lowerNotes = mb_strtolower($notes);
+        foreach (self::MERCHANT_CATEGORY_MAP as $brand => $targetCategoryKeywords) {
+            if (str_contains($lowerNotes, $brand)) {
+                foreach ($targetCategoryKeywords as $keyword) {
+                    $matchedCategory = $categories->first(function ($cat) use ($keyword) {
+                        return stripos($cat->name, $keyword) !== false || stripos($keyword, $cat->name) !== false;
+                    });
+
+                    if ($matchedCategory) {
+                        return [
+                            'status' => 'suggested',
+                            'suggestion' => [
+                                'category_id' => $matchedCategory->id,
+                                'category_name' => $matchedCategory->name,
+                                'confidence' => 0.95,
+                                'reason' => "Matched Philippine brand '{$brand}'.",
+                            ],
+                            'message' => null,
+                            'fallback' => false,
+                            'meta' => [
+                                'model' => 'merchant_dictionary',
+                                'latency_ms' => 0,
+                            ],
+                        ];
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function buildSummary(User $user): array
+    {
+        return $this->financeSummary->getAiSummary($user->id);
     }
 
     private function buildReportsContext(User $user): array
     {
-        $userId = $user->id;
         $now = Carbon::now();
-
-        $categorySummary = Transaction::query()
-            ->ownedBy($userId)
-            ->ofType('expense')
-            ->whereMonth('date', $now->month)
-            ->whereYear('date', $now->year)
-            ->selectRaw('category_id, sum(amount) as total')
-            ->groupBy('category_id')
-            ->with('category:id,name')
-            ->get()
-            ->map(function ($item) {
-                return [
-                    'name' => $item->category->name ?? 'Uncategorized',
-                    'value' => (float) $item->total,
-                ];
-            })
+        $categorySummary = $this->financeSummary->getCategorySummary($user->id, $now)
+            ->map(fn ($item) => [
+                'name' => $item['name'],
+                'value' => (float) $item['value'],
+            ])
             ->values()
             ->all();
 
-        $trendTransactions = Transaction::query()
-            ->ownedBy($userId)
-            ->whereBetween('date', [$now->copy()->subMonths(5)->startOfMonth(), $now->copy()->endOfMonth()])
-            ->get(['date', 'amount', 'type', 'is_spent']);
-
-        $trendByMonth = $trendTransactions->groupBy(function (Transaction $transaction): string {
-            return Carbon::parse($transaction->date)->format('Y-n');
-        });
-
-        $trend = [];
-        for ($i = 5; $i >= 0; $i--) {
-            $month = $now->copy()->subMonths($i);
-            $monthTotals = $trendByMonth->get($month->format('Y-n'), collect());
-
-            $trend[] = [
-                'month' => $month->format('M'),
-                'income' => (float) $monthTotals->where('type', 'income')->sum('amount'),
-                'expense' => (float) (
-                    $monthTotals->where('type', 'expense')->sum('amount') +
-                    $monthTotals->where('type', 'income')->where('is_spent', true)->sum('amount')
-                ),
-            ];
-        }
-
-        $loans = Loan::query()
-            ->where('user_id', $userId)
-            ->select(['amount', 'remaining_amount'])
-            ->get();
-
-        $savings = SavingsGoal::query()
-            ->where('user_id', $userId)
-            ->select(['target_amount', 'current_amount'])
-            ->get();
+        $monthlyTrend = $this->financeSummary->getMonthlyTrend($user->id, $now, 6);
 
         return [
             'category_summary' => $categorySummary,
-            'trend' => $trend,
-            'loan_summary' => [
-                'total_original' => (float) $loans->sum('amount'),
-                'total_remaining' => (float) $loans->sum('remaining_amount'),
-                'total_paid' => (float) ($loans->sum('amount') - $loans->sum('remaining_amount')),
-            ],
-            'savings_summary' => [
-                'total_target' => (float) $savings->sum('target_amount'),
-                'total_current' => (float) $savings->sum('current_amount'),
-                'total_needed' => (float) ($savings->sum('target_amount') - $savings->sum('current_amount')),
-            ],
+            'trend' => $monthlyTrend['trend'],
+            'loan_summary' => $this->financeSummary->getLoanSummary($user->id),
+            'savings_summary' => $this->financeSummary->getSavingsSummary($user->id),
         ];
     }
 
@@ -419,7 +505,7 @@ class AiService
     private function fallbackChat(array $summary, array $result): array
     {
         $message = sprintf(
-            'AI is temporarily unavailable. Current balance: %.2f. Remaining budget: %.2f. Top categories: %s.',
+            'AI is temporarily unavailable. Current balance: ₱%.2f. Remaining budget: ₱%.2f. Top categories: %s.',
             $summary['current_balance'] ?? 0,
             $summary['remaining_budget'] ?? 0,
             $this->formatCategoryNames($summary['top_categories'] ?? [])
@@ -437,7 +523,7 @@ class AiService
     private function fallbackInsights(array $summary, array $reports, array $result): array
     {
         $insights = [
-            sprintf('Current balance is %.2f with remaining budget %.2f.', $summary['current_balance'] ?? 0, $summary['remaining_budget'] ?? 0),
+            sprintf('Current balance is ₱%.2f with remaining budget ₱%.2f.', $summary['current_balance'] ?? 0, $summary['remaining_budget'] ?? 0),
         ];
 
         $topCategory = $summary['top_categories'][0]['name'] ?? null;
@@ -447,7 +533,7 @@ class AiService
 
         $loanRemaining = $reports['loan_summary']['total_remaining'] ?? null;
         if ($loanRemaining !== null) {
-            $insights[] = sprintf('Outstanding loans remaining: %.2f.', $loanRemaining);
+            $insights[] = sprintf('Outstanding loans remaining: ₱%.2f.', $loanRemaining);
         }
 
         return [
@@ -520,19 +606,38 @@ class AiService
 
     private function sanitizeChatReply(string $text): string
     {
-        $cleaned = str_replace('*', '', $text);
-        $cleaned = preg_replace('/\s+/', ' ', $cleaned) ?? $cleaned;
+        $cleaned = str_replace(['*', '#', '`'], '', $text);
+        // Normalize currency symbols: replace $ preceding numbers or USD with ₱
+        $cleaned = preg_replace('/\$(\d)/', '₱$1', $cleaned) ?? $cleaned;
+        $cleaned = preg_replace('/\bUSD\s*(\d)/i', '₱$1', $cleaned) ?? $cleaned;
+        // Normalize line breaks
+        $cleaned = str_replace(["\r\n", "\r"], "\n", $cleaned);
+        // Replace horizontal whitespace runs on same line with a single space
+        $cleaned = preg_replace('/[^\S\n]+/', ' ', $cleaned) ?? $cleaned;
+        // Collapse excessive newlines
+        $cleaned = preg_replace("/\n{3,}/", "\n\n", $cleaned) ?? $cleaned;
 
         return $this->ensureStructuredReply(trim($cleaned));
     }
 
     private function ensureStructuredReply(string $text): string
     {
-        $hasSummary = stripos($text, 'Summary:') !== false;
-        $hasActions = stripos($text, 'Actions:') !== false;
+        if (preg_match('/Summary:\s*(.+?)(?:\n+|\s+)Actions:\s*(.+)$/s', $text, $matches)) {
+            $summary = trim($matches[1]);
+            $actionsRaw = trim($matches[2]);
 
-        if ($hasSummary && $hasActions) {
-            return $text;
+            $actionItems = preg_split('/(?=\b\d+\.\s+)/', $actionsRaw, -1, PREG_SPLIT_NO_EMPTY);
+            $cleanActions = [];
+            foreach ($actionItems as $item) {
+                $trimmed = trim($item);
+                if ($trimmed !== '') {
+                    $cleanActions[] = $trimmed;
+                }
+            }
+
+            if (! empty($cleanActions)) {
+                return "Summary: {$summary}\n\nActions:\n".implode("\n", $cleanActions);
+            }
         }
 
         $sentences = preg_split('/(?<=[.!?])\s+/', $text) ?: [];
@@ -561,7 +666,7 @@ class AiService
             $actionLines[] = ($index + 1).'. '.$action;
         }
 
-        return "Summary: {$summary}\nActions: ".implode(' ', $actionLines);
+        return "Summary: {$summary}\n\nActions:\n".implode("\n", $actionLines);
     }
 
     private function formatCategoryNames(array $categories): string

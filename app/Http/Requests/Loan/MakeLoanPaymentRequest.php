@@ -21,4 +21,17 @@ class MakeLoanPaymentRequest extends FormRequest
             'amount' => ['required', 'numeric', 'min:0.01', 'max:999999999.99'],
         ];
     }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'amount.required' => 'Please enter a repayment amount.',
+            'amount.numeric' => 'The repayment amount must be a valid number.',
+            'amount.min' => 'The repayment amount must be at least ₱0.01.',
+            'amount.max' => 'The repayment amount cannot exceed ₱999,999,999.99.',
+        ];
+    }
 }

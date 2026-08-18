@@ -101,4 +101,47 @@ class SavingsGoalTest extends TestCase
             ])
             ->assertSessionHasErrors('deadline');
     }
+
+    public function test_uploading_image_stores_hashed_file_and_replaces_old_image(): void
+    {
+        \Illuminate\Support\Facades\Storage::fake('public');
+
+        $user = User::factory()->create();
+        $file1 = \Illuminate\Http\UploadedFile::fake()->image('goal.png');
+
+        $this->actingAs($user)
+            ->post('/savings-goals', [
+                'name' => 'New Car',
+                'target_amount' => 20000,
+                'deadline' => now()->addYear()->toDateString(),
+                'image' => $file1,
+            ])
+            ->assertRedirect();
+
+        $goal = SavingsGoal::where('name', 'New Car')->firstOrFail();
+        $this->assertNotNull($goal->image);
+        $this->assertStringStartsWith('/storage/savings-goals/', $goal->image);
+
+        $storedPath1 = str_replace('/storage/', '', $goal->image);
+        \Illuminate\Support\Facades\Storage::disk('public')->assertExists($storedPath1);
+
+        // Update with new image
+        $file2 = \Illuminate\Http\UploadedFile::fake()->image('newer_car.webp');
+
+        $this->actingAs($user)
+            ->post("/savings-goals/{$goal->id}", [
+                'name' => 'New Car Updated',
+                'target_amount' => 25000,
+                'deadline' => now()->addYear()->toDateString(),
+                'image' => $file2,
+            ])
+            ->assertRedirect();
+
+        $goal->refresh();
+        $storedPath2 = str_replace('/storage/', '', $goal->image);
+
+        // Old file must be deleted, new file must exist
+        \Illuminate\Support\Facades\Storage::disk('public')->assertMissing($storedPath1);
+        \Illuminate\Support\Facades\Storage::disk('public')->assertExists($storedPath2);
+    }
 }

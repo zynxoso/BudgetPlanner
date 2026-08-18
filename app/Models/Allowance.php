@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Traits\OwnedByUser;
 use Illuminate\Database\Eloquent\Model;
 
 class Allowance extends Model
 {
+    use OwnedByUser;
+
     protected $fillable = ['user_id', 'amount', 'frequency'];
 
     protected $casts = [

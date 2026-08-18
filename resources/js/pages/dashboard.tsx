@@ -10,13 +10,9 @@ import {
     ArrowRight,
     HandCoins,
     BadgePercent,
-    Target,
-    Sparkles,
-    Send
+    Target
 } from 'lucide-react';
 import { 
-    BarChart, 
-    Bar, 
     XAxis, 
     YAxis, 
     CartesianGrid, 
@@ -25,8 +21,7 @@ import {
     AreaChart,
     Area
 } from 'recharts';
-import { memo, useState } from 'react';
-import { getErrorMessage, postJson } from '@/lib/api';
+import { memo } from 'react';
 
 const breadcrumbs: BreadcrumbItem[] = [
     {
@@ -71,22 +66,9 @@ type SpendingChartPoint = DashboardProps['spendingChart'][number];
 type TopCategory = DashboardProps['topCategories'][number];
 type RecentTransaction = DashboardProps['recentTransactions'][number];
 
-type AiRole = 'user' | 'assistant';
-
-interface AiMessage {
-    role: AiRole;
-    content: string;
-}
-
-interface AiChatResponse {
-    status: 'ok' | 'fallback' | 'unavailable';
-    reply?: string;
-    message?: string | null;
-}
-
 const ActivityChart = memo(function ActivityChart({ spendingChart }: { spendingChart: SpendingChartPoint[] }) {
     return (
-        <div className="col-span-4 rounded-xl border bg-card p-6 shadow-sm">
+        <div className="col-span-1 lg:col-span-4 rounded-xl border bg-card p-6 shadow-sm">
             <div className="mb-4">
                 <h3 className="text-lg font-semibold">Weekly Activity</h3>
                 <p className="text-sm text-muted-foreground">Spending behavior for the last 7 days</p>
@@ -114,7 +96,7 @@ const ActivityChart = memo(function ActivityChart({ spendingChart }: { spendingC
 
 const TopCategoriesCard = memo(function TopCategoriesCard({ topCategories }: { topCategories: TopCategory[] }) {
     return (
-        <div className="col-span-3 rounded-xl border bg-card p-6 shadow-sm">
+        <div className="col-span-1 lg:col-span-3 rounded-xl border bg-card p-6 shadow-sm">
             <div className="mb-6 flex items-center justify-between">
                 <div>
                     <h3 className="text-lg font-semibold">Top Categories</h3>
@@ -203,148 +185,6 @@ const RecentTransactionsTable = memo(function RecentTransactionsTable({ recentTr
     );
 });
 
-const AiAssistantCard = memo(function AiAssistantCard() {
-    const [messages, setMessages] = useState<AiMessage[]>([]);
-    const [input, setInput] = useState('');
-    const [loading, setLoading] = useState(false);
-    const [notice, setNotice] = useState<string | null>(null);
-
-    const quickPrompts = [
-        'Where can I cut expenses this month?',
-        'What is a safe weekly spending limit?',
-        'Summarize my biggest money drains.',
-        'Suggest a small savings goal for next month.',
-    ];
-
-    const sendMessage = async (content: string) => {
-        const trimmed = content.trim();
-        if (!trimmed || loading) {
-            return;
-        }
-
-        setNotice(null);
-        setLoading(true);
-
-        const history = messages.slice(-6);
-        const nextHistory = [...history, { role: 'user', content: trimmed }];
-
-        setMessages((prev) => [...prev, { role: 'user', content: trimmed }]);
-        setInput('');
-
-        try {
-            const response = await postJson<AiChatResponse>('/ai/chat', {
-                message: trimmed,
-                history: nextHistory,
-            });
-
-            if (response.reply) {
-                setMessages((prev) => [...prev, { role: 'assistant', content: response.reply }]);
-            }
-
-            if (response.status !== 'ok') {
-                setNotice(response.message || 'AI is unavailable right now.');
-            }
-        } catch (error) {
-            setNotice(getErrorMessage(error));
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return (
-        <div className="rounded-xl border bg-card p-6 shadow-sm">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-foreground">
-                        <Sparkles className="h-5 w-5" />
-                    </div>
-                    <div>
-                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">AI Co-Pilot</p>
-                        <h3 className="text-lg font-semibold text-foreground">Plan today, spend with intent</h3>
-                    </div>
-                </div>
-                <span className="inline-flex items-center rounded-full border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground">Beta</span>
-            </div>
-
-            <div className="mt-6 grid gap-6 lg:grid-cols-[1.4fr_0.9fr]">
-                <div className="space-y-3">
-                    <div className="min-h-[140px] max-h-64 space-y-3 overflow-y-auto rounded-xl border border-border bg-background p-4">
-                        {messages.length === 0 && (
-                            <p className="text-sm text-muted-foreground">No messages yet. Try asking "Where can I cut expenses this month?"</p>
-                        )}
-                        {messages.map((message, index) => (
-                            <div key={index} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                <div
-                                    className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-                                        message.role === 'user'
-                                            ? 'bg-primary text-primary-foreground'
-                                            : 'border border-border bg-muted text-foreground'
-                                    }`}
-                                >
-                                    {message.content}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-
-                    {notice && <p className="text-xs text-destructive">{notice}</p>}
-
-                    <form
-                        onSubmit={(event) => {
-                            event.preventDefault();
-                            sendMessage(input);
-                        }}
-                        className="flex flex-col gap-3 sm:flex-row sm:items-center"
-                    >
-                        <input
-                            type="text"
-                            value={input}
-                            onChange={(event) => setInput(event.target.value)}
-                            placeholder="Ask about spending, budgets, or goals..."
-                            className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                        />
-                        <button
-                            type="submit"
-                            disabled={loading || input.trim().length === 0}
-                            className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-                        >
-                            {loading ? 'Sending...' : 'Send'}
-                            <Send className="h-4 w-4" />
-                        </button>
-                    </form>
-                </div>
-
-                <div className="space-y-4">
-                    <div className="rounded-xl border border-border bg-muted/40 p-4">
-                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">Quick prompts</p>
-                        <div className="mt-3 grid gap-2">
-                            {quickPrompts.map((prompt) => (
-                                <button
-                                    key={prompt}
-                                    type="button"
-                                    onClick={() => setInput(prompt)}
-                                    className="rounded-lg border border-border bg-background px-3 py-2 text-left text-xs text-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
-                                >
-                                    {prompt}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div className="rounded-xl border border-border bg-background p-4">
-                        <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">What I can do</p>
-                        <div className="mt-3 space-y-2 text-sm text-foreground">
-                            <p>Spot overspending patterns across categories.</p>
-                            <p>Suggest realistic saving goals based on activity.</p>
-                            <p>Explain changes in balance and budget drift.</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    );
-});
-
 export default function Dashboard({ summary, recentTransactions, spendingChart, topCategories }: DashboardProps) {
     const formatCurrency = (amount: number) => currencyFormatter.format(amount);
 
@@ -352,111 +192,163 @@ export default function Dashboard({ summary, recentTransactions, spendingChart, 
         <AppLayout breadcrumbs={breadcrumbs}>
             <Head title="Dashboard" />
             
-            <div className="flex flex-col gap-6 p-6">
-                <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-8 p-4 md:p-8">
+                {/* Header Title Section */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
-                        <h2 className="text-3xl font-bold tracking-tight">Overview</h2>
-                        <p className="text-muted-foreground">Financial summary of your activity</p>
+                        <h2 className="text-2xl font-bold">Overview</h2>
+                        <p className="text-muted-foreground">Financial summary and system overview</p>
                     </div>
-                    <div className="flex gap-3">
+                    <div className="flex flex-wrap items-center gap-2.5">
                         <Link 
                             href="/income" 
-                            className="inline-flex items-center justify-center rounded-md bg-zinc-100 px-4 py-2 text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-200"
+                            className="inline-flex items-center justify-center rounded-md border border-input bg-background px-3.5 py-2 text-xs font-medium transition-colors hover:bg-muted"
                         >
-                            <Plus className="mr-2 h-4 w-4" /> Add Income
+                            <Plus className="mr-1.5 h-3.5 w-3.5" /> Add Income
                         </Link>
                         <Link 
                             href="/expenses" 
-                            className="inline-flex items-center justify-center rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-50 transition-colors hover:bg-zinc-800"
+                            className="inline-flex items-center justify-center rounded-md bg-zinc-900 px-3.5 py-2 text-xs font-medium text-zinc-50 transition-colors hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-white shadow-sm"
                         >
-                            <Plus className="mr-2 h-4 w-4" /> Add Expense
+                            <Plus className="mr-1.5 h-3.5 w-3.5" /> Add Expense
                         </Link>
                     </div>
                 </div>
 
-                <AiAssistantCard />
-
-                {/* Summary Cards */}
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                    <div className="rounded-xl border bg-card p-6 shadow-sm">
-                        <div className="flex items-center justify-between">
-                            <p className="text-sm font-medium text-muted-foreground">Current Balance</p>
-                            <Wallet className="h-4 w-4 text-primary" />
-                        </div>
-                        <div className="mt-2">
-                            <h3 className="text-2xl font-bold">{formatCurrency(summary.currentBalance)}</h3>
+                {/* Primary Metric Cards */}
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    {/* Current Balance */}
+                    <div className="animate-fade-in-up stagger-1 card-interactive group relative rounded-2xl border bg-card p-6 shadow-sm overflow-hidden flex flex-col justify-between hover:border-zinc-500/40 dark:hover:border-zinc-500/30 transition-all duration-300">
+                        <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-gradient-to-br from-zinc-500/10 via-zinc-500/[0.02] to-transparent blur-2xl pointer-events-none opacity-50 dark:opacity-70 group-hover:opacity-100 transition-opacity duration-500" />
+                        <Wallet className="absolute -right-2 -bottom-2 h-28 w-28 text-foreground/[0.20] dark:text-foreground/[0.18] pointer-events-none transition-all duration-500 group-hover:scale-110 group-hover:text-foreground/[0.28] -rotate-12 stroke-[1.25]" />
+                        
+                        <div className="relative z-10">
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Current Balance</span>
+                                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-muted text-foreground transition-transform group-hover:scale-110 shadow-2xs">
+                                    <Wallet className="h-4.5 w-4.5" />
+                                </div>
+                            </div>
+                            <div className="mt-3">
+                                <h3 className="text-2xl font-bold text-foreground tracking-tight">{formatCurrency(summary.currentBalance)}</h3>
+                                <p className="text-xs text-muted-foreground mt-1">Combined balance across accounts</p>
+                            </div>
                         </div>
                     </div>
                     
-                    <div className="rounded-xl border bg-card p-6 shadow-sm">
-                        <div className="flex items-center justify-between">
-                            <p className="text-sm font-medium text-muted-foreground">Total Income</p>
-                            <TrendingUp className="h-4 w-4 text-emerald-500" />
-                        </div>
-                        <div className="mt-2">
-                            <h3 className="text-2xl font-bold">{formatCurrency(summary.totalIncome)}</h3>
+                    {/* Total Income */}
+                    <div className="animate-fade-in-up stagger-2 card-interactive group relative rounded-2xl border bg-card p-6 shadow-sm overflow-hidden flex flex-col justify-between hover:border-emerald-500/40 dark:hover:border-emerald-500/30 transition-all duration-300">
+                        <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-gradient-to-br from-emerald-500/10 via-emerald-500/[0.02] to-transparent blur-2xl pointer-events-none opacity-50 dark:opacity-70 group-hover:opacity-100 transition-opacity duration-500" />
+                        <TrendingUp className="absolute -right-2 -bottom-2 h-28 w-28 text-foreground/[0.20] dark:text-foreground/[0.18] pointer-events-none transition-all duration-500 group-hover:scale-110 group-hover:text-foreground/[0.28] -rotate-12 stroke-[1.25]" />
+
+                        <div className="relative z-10">
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Total Income</span>
+                                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500/10 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 transition-transform group-hover:scale-110 shadow-2xs">
+                                    <TrendingUp className="h-4.5 w-4.5" />
+                                </div>
+                            </div>
+                            <div className="mt-3">
+                                <h3 className="text-2xl font-bold text-foreground tracking-tight">{formatCurrency(summary.totalIncome)}</h3>
+                                <p className="text-xs text-muted-foreground mt-1">Total recorded earnings</p>
+                            </div>
                         </div>
                     </div>
 
-                    <div className="rounded-xl border bg-card p-6 shadow-sm">
-                        <div className="flex items-center justify-between">
-                            <p className="text-sm font-medium text-muted-foreground">Total Expenses</p>
-                            <TrendingDown className="h-4 w-4 text-rose-500" />
-                        </div>
-                        <div className="mt-2">
-                            <h3 className="text-2xl font-bold">{formatCurrency(summary.totalExpenses)}</h3>
+                    {/* Total Expenses */}
+                    <div className="animate-fade-in-up stagger-3 card-interactive group relative rounded-2xl border bg-card p-6 shadow-sm overflow-hidden flex flex-col justify-between hover:border-rose-500/40 dark:hover:border-rose-500/30 transition-all duration-300">
+                        <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-gradient-to-br from-rose-500/10 via-rose-500/[0.02] to-transparent blur-2xl pointer-events-none opacity-50 dark:opacity-70 group-hover:opacity-100 transition-opacity duration-500" />
+                        <TrendingDown className="absolute -right-2 -bottom-2 h-28 w-28 text-foreground/[0.20] dark:text-foreground/[0.18] pointer-events-none transition-all duration-500 group-hover:scale-110 group-hover:text-foreground/[0.28] -rotate-12 stroke-[1.25]" />
+
+                        <div className="relative z-10">
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Total Expenses</span>
+                                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-500/10 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400 transition-transform group-hover:scale-110 shadow-2xs">
+                                    <TrendingDown className="h-4.5 w-4.5" />
+                                </div>
+                            </div>
+                            <div className="mt-3">
+                                <h3 className="text-2xl font-bold text-foreground tracking-tight">{formatCurrency(summary.totalExpenses)}</h3>
+                                <p className="text-xs text-muted-foreground mt-1">Total recorded spending</p>
+                            </div>
                         </div>
                     </div>
 
-                    <div className="rounded-xl border bg-card p-6 shadow-sm">
-                        <div className="flex items-center justify-between">
-                            <p className="text-sm font-medium text-muted-foreground">Remaining Budget</p>
-                            <PieChart className="h-4 w-4 text-blue-500" />
-                        </div>
-                        <div className="mt-2">
-                            <h3 className="text-2xl font-bold">{formatCurrency(summary.remainingBudget)}</h3>
-                        </div>
-                    </div>
-                </div>
-                {/* Secondary Summary Cards */}
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-                    <div className="rounded-xl border bg-card p-6 shadow-sm">
-                        <div className="flex items-center justify-between">
-                            <p className="text-sm font-medium text-muted-foreground">Total Savings</p>
-                            <Target className="h-4 w-4 text-emerald-500" />
-                        </div>
-                        <div className="mt-2">
-                            <h3 className="text-2xl font-bold">{formatCurrency(summary.totalSavings)}</h3>
-                        </div>
-                    </div>
+                    {/* Remaining Budget */}
+                    <div className="animate-fade-in-up stagger-4 card-interactive group relative rounded-2xl border bg-card p-6 shadow-sm overflow-hidden flex flex-col justify-between hover:border-blue-500/40 dark:hover:border-blue-500/30 transition-all duration-300">
+                        <div className="absolute -right-8 -top-8 h-32 w-32 rounded-full bg-gradient-to-br from-blue-500/10 via-blue-500/[0.02] to-transparent blur-2xl pointer-events-none opacity-50 dark:opacity-70 group-hover:opacity-100 transition-opacity duration-500" />
+                        <PieChart className="absolute -right-2 -bottom-2 h-28 w-28 text-foreground/[0.20] dark:text-foreground/[0.18] pointer-events-none transition-all duration-500 group-hover:scale-110 group-hover:text-foreground/[0.28] -rotate-12 stroke-[1.25]" />
 
-                    <div className="rounded-xl border bg-card p-6 shadow-sm">
-                        <div className="flex items-center justify-between">
-                            <p className="text-sm font-medium text-muted-foreground">Outstanding Loans</p>
-                            <BadgePercent className="h-4 w-4 text-amber-500" />
-                        </div>
-                        <div className="mt-2">
-                            <h3 className="text-2xl font-bold">{formatCurrency(summary.totalLoansOutstanding)}</h3>
-                        </div>
-                    </div>
-
-                    <div className="rounded-xl border bg-card p-6 shadow-sm">
-                        <div className="flex items-center justify-between">
-                            <p className="text-sm font-medium text-muted-foreground">Monthly Allowances</p>
-                            <HandCoins className="h-4 w-4 text-indigo-500" />
-                        </div>
-                        <div className="mt-2">
-                            <h3 className="text-2xl font-bold">{formatCurrency(summary.totalAllowances)}</h3>
+                        <div className="relative z-10">
+                            <div className="flex items-center justify-between">
+                                <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Remaining Budget</span>
+                                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-500/10 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400 transition-transform group-hover:scale-110 shadow-2xs">
+                                    <PieChart className="h-4.5 w-4.5" />
+                                </div>
+                            </div>
+                            <div className="mt-3">
+                                <h3 className="text-2xl font-bold text-foreground tracking-tight">{formatCurrency(summary.remainingBudget)}</h3>
+                                <p className="text-xs text-muted-foreground mt-1">Unallocated monthly budget</p>
+                            </div>
                         </div>
                     </div>
                 </div>
 
+                {/* Secondary Planning & Accounts Summary */}
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <Link href="/savings-goals" className="animate-fade-in-up stagger-4 card-interactive group rounded-2xl border bg-card p-5 shadow-sm">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-muted text-foreground transition-transform group-hover:scale-110">
+                                    <Target className="h-4.5 w-4.5" />
+                                </div>
+                                <div>
+                                    <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Savings Goals</p>
+                                    <h4 className="text-lg font-bold text-foreground mt-0.5">{formatCurrency(summary.totalSavings)}</h4>
+                                </div>
+                            </div>
+                            <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-1 group-hover:text-foreground" />
+                        </div>
+                    </Link>
+
+                    <Link href="/loans" className="animate-fade-in-up stagger-5 card-interactive group rounded-2xl border bg-card p-5 shadow-sm">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 transition-transform group-hover:scale-110">
+                                    <BadgePercent className="h-4.5 w-4.5" />
+                                </div>
+                                <div>
+                                    <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Outstanding Loans</p>
+                                    <h4 className="text-lg font-bold text-foreground mt-0.5">{formatCurrency(summary.totalLoansOutstanding)}</h4>
+                                </div>
+                            </div>
+                            <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-1 group-hover:text-foreground" />
+                        </div>
+                    </Link>
+
+                    <Link href="/allowance" className="animate-fade-in-up stagger-6 card-interactive group rounded-2xl border bg-card p-5 shadow-sm sm:col-span-2 lg:col-span-1">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 transition-transform group-hover:scale-110">
+                                    <HandCoins className="h-4.5 w-4.5" />
+                                </div>
+                                <div>
+                                    <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Allowances</p>
+                                    <h4 className="text-lg font-bold text-foreground mt-0.5">{formatCurrency(summary.totalAllowances)}</h4>
+                                </div>
+                            </div>
+                            <ArrowRight className="h-4 w-4 text-muted-foreground transition-transform duration-200 group-hover:translate-x-1 group-hover:text-foreground" />
+                        </div>
+                    </Link>
+                </div>
+
+                {/* Activity & Category Charts */}
                 <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-7">
                     <ActivityChart spendingChart={spendingChart} />
                     <TopCategoriesCard topCategories={topCategories} />
                 </div>
 
-                {/* Recent Transactions */}
+                {/* Recent Transactions Table */}
                 <RecentTransactionsTable recentTransactions={recentTransactions} formatCurrency={formatCurrency} />
             </div>
         </AppLayout>

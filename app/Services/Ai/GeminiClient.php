@@ -52,22 +52,35 @@ class GeminiClient
         }
 
         $baseUrl = rtrim($config['base_url'] ?? 'https://generativelanguage.googleapis.com/v1beta', '/');
-        $url = $baseUrl.'/models/'.$model.':generateContent?key='.$apiKey;
+        $url = $baseUrl.'/models/'.$model.':generateContent';
 
         $timeout = (int) ($config['timeout'] ?? 20);
         $retries = (int) ($config['retry'] ?? 1);
 
         $start = microtime(true);
 
-        $response = Http::timeout($timeout)
-            ->retry($retries, 200, null, false)
-            ->acceptJson()
-            ->post($url, $payload);
+        try {
+            $response = Http::timeout($timeout)
+                ->withHeaders([
+                    'x-goog-api-key' => $apiKey,
+                ])
+                ->retry($retries, 200, null, false)
+                ->acceptJson()
+                ->post($url, $payload);
+        } catch (\Throwable $e) {
+            $this->recordFailure(null);
+
+            return [
+                'ok' => false,
+                'error' => 'connection_error',
+                'latency_ms' => (int) round((microtime(true) - $start) * 1000),
+            ];
+        }
 
         $latencyMs = (int) round((microtime(true) - $start) * 1000);
 
         if (! $response->ok()) {
-            $this->recordFailure();
+            $this->recordFailure($response->status());
 
             return [
                 'ok' => false,
@@ -78,14 +91,18 @@ class GeminiClient
         }
 
         $data = $response->json();
-        $text = data_get($data, 'candidates.0.content.parts.0.text');
+        $candidate = data_get($data, 'candidates.0');
+        $text = data_get($candidate, 'content.parts.0.text');
+        $finishReason = data_get($candidate, 'finishReason');
 
         if (! is_string($text) || trim($text) === '') {
-            $this->recordFailure();
+            $blockReason = data_get($data, 'promptFeedback.blockReason');
+            $this->recordFailure(null);
 
             return [
                 'ok' => false,
-                'error' => 'empty_response',
+                'error' => $blockReason ? 'safety_blocked' : 'empty_response',
+                'finish_reason' => $finishReason,
                 'latency_ms' => $latencyMs,
             ];
         }
@@ -96,12 +113,13 @@ class GeminiClient
             'ok' => true,
             'text' => trim($text),
             'raw' => $data,
+            'finish_reason' => $finishReason,
             'latency_ms' => $latencyMs,
             'model' => $model,
         ];
     }
 
-    private function isCircuitOpen(): bool
+    public function isCircuitOpen(): bool
     {
         $disabledUntil = Cache::get($this->disabledUntilKey);
 
@@ -112,10 +130,19 @@ class GeminiClient
         return now()->lessThan($disabledUntil);
     }
 
-    private function recordFailure(): void
+    public function recordFailure(?int $status = null): void
     {
+        // 4xx errors (except 429 Too Many Requests) are client errors and must not open the circuit
+        if ($status !== null && $status >= 400 && $status < 500 && $status !== 429) {
+            return;
+        }
+
         $threshold = (int) (config('services.gemini.failure_threshold') ?? 3);
-        $cooldownSeconds = (int) (config('services.gemini.cooldown_seconds') ?? 300);
+        
+        // 429 Rate Limit can use a shorter cooldown to recover faster once rate limits reset
+        $cooldownSeconds = $status === 429
+            ? (int) (config('services.gemini.rate_limit_cooldown_seconds') ?? 60)
+            : (int) (config('services.gemini.cooldown_seconds') ?? 300);
 
         $failures = (int) Cache::get($this->failureKey, 0);
         $failures++;
@@ -125,7 +152,7 @@ class GeminiClient
         }
     }
 
-    private function clearFailures(): void
+    public function clearFailures(): void
     {
         Cache::forget($this->failureKey);
         Cache::forget($this->disabledUntilKey);

@@ -2,11 +2,14 @@
 
 namespace App\Models;
 
+use App\Traits\OwnedByUser;
 use Illuminate\Database\Eloquent\Model;
 
 class SavingsGoal extends Model
 {
-    protected $fillable = ['user_id', 'name', 'target_amount', 'current_amount', 'deadline'];
+    use OwnedByUser;
+
+    protected $fillable = ['user_id', 'name', 'image', 'target_amount', 'current_amount', 'deadline'];
 
     protected $casts = [
         'target_amount' => 'decimal:2',

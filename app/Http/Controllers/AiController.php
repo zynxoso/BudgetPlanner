@@ -16,10 +16,10 @@ class AiController extends Controller
     public function chat(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'message' => ['required', 'string', 'max:2000'],
-            'history' => ['array', 'max:10'],
+            'message' => ['required', 'string', 'max:600'],
+            'history' => ['array', 'max:6'],
             'history.*.role' => ['required', Rule::in(['user', 'assistant'])],
-            'history.*.content' => ['required', 'string', 'max:2000'],
+            'history.*.content' => ['required', 'string', 'max:600'],
         ]);
 
         $result = $this->ai->chat($request->user(), $validated['message'], $validated['history'] ?? []);
@@ -38,7 +38,7 @@ class AiController extends Controller
     {
         $validated = $request->validate([
             'amount' => ['required', 'numeric', 'min:0'],
-            'notes' => ['nullable', 'string', 'max:500'],
+            'notes' => ['nullable', 'string', 'max:300'],
             'date' => ['nullable', 'date'],
         ]);
 

@@ -5,17 +5,21 @@ use Inertia\Inertia;
 
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\TransactionController;
-use App\Http\Controllers\CategoryController;
 use App\Http\Controllers\BudgetController;
 use App\Http\Controllers\AllowanceController;
 use App\Http\Controllers\SavingsGoalController;
 use App\Http\Controllers\LoanController;
 use App\Http\Controllers\ReportsController;
+use App\Http\Controllers\BankAccountController;
 use App\Http\Controllers\AiController;
 
-Route::get('/', [DashboardController::class, 'index'])
-    ->middleware(['auth'])
-    ->name('home');
+Route::get('/', function () {
+    return Inertia::render('welcome');
+})->name('home');
+
+Route::get('/welcome', function () {
+    return Inertia::render('welcome');
+})->name('welcome');
 
 Route::middleware(['auth'])->group(function () {
     Route::get('dashboard', [DashboardController::class, 'index'])->name('dashboard');
@@ -37,6 +41,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('savings-goals', [SavingsGoalController::class, 'index'])->name('savings-goals.index');
     Route::patch('savings-goals/{savingsGoal}/add-amount', [SavingsGoalController::class, 'updateAddAmount'])->name('savings-goals.updateAddAmount');
     Route::post('savings-goals', [SavingsGoalController::class, 'store'])->name('savings-goals.store');
+    Route::post('savings-goals/{savingsGoal}', [SavingsGoalController::class, 'update'])->name('savings-goals.update');
     Route::delete('savings-goals/{savingsGoal}', [SavingsGoalController::class, 'destroy'])->name('savings-goals.destroy');
     
     Route::get('loans', [LoanController::class, 'index'])->name('loans.index');
@@ -48,11 +53,21 @@ Route::middleware(['auth'])->group(function () {
     Route::delete('transactions/{transaction}', [TransactionController::class, 'destroy'])->name('transactions.destroy');
     Route::put('transactions/{transaction}', [TransactionController::class, 'update'])->name('transactions.update');
     
+    Route::get('reports/export', [ReportsController::class, 'export'])->middleware('throttle:exports')->name('reports.export');
+    Route::get('reports/statement', [ReportsController::class, 'statement'])->name('reports.statement');
     Route::get('reports', [ReportsController::class, 'index'])->name('reports.index');
 
-    Route::post('ai/chat', [AiController::class, 'chat'])->name('ai.chat');
-    Route::post('ai/insights', [AiController::class, 'insights'])->name('ai.insights');
-    Route::post('ai/categorize', [AiController::class, 'categorize'])->name('ai.categorize');
+    Route::get('banks', [BankAccountController::class, 'index'])->name('banks.index');
+    Route::post('banks', [BankAccountController::class, 'store'])->name('banks.store');
+    Route::put('banks/{bankAccount}', [BankAccountController::class, 'update'])->name('banks.update');
+    Route::delete('banks/{bankAccount}', [BankAccountController::class, 'destroy'])->name('banks.destroy');
+    Route::post('banks/transfer', [BankAccountController::class, 'transfer'])->name('banks.transfer');
+
+    Route::middleware('throttle:ai')->group(function () {
+        Route::post('ai/chat', [AiController::class, 'chat'])->name('ai.chat');
+        Route::post('ai/insights', [AiController::class, 'insights'])->name('ai.insights');
+        Route::post('ai/categorize', [AiController::class, 'categorize'])->name('ai.categorize');
+    });
 });
 
 require __DIR__.'/settings.php';

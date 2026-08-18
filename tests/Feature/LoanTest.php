@@ -58,6 +58,12 @@ class LoanTest extends TestCase
         $loan->refresh();
         $this->assertEquals(700, $loan->remaining_amount);
         $this->assertEquals('active', $loan->status);
+
+        $this->assertDatabaseHas('loan_payments', [
+            'loan_id' => $loan->id,
+            'amount' => 300,
+            'overpayment_amount' => 0,
+        ]);
     }
 
     public function test_overpayment_clamps_to_zero_and_marks_paid(): void
@@ -66,12 +72,18 @@ class LoanTest extends TestCase
         $loan = $this->makeLoan($user, 1000, 200);
 
         $this->actingAs($user)
-            ->patch("/loans/{$loan->id}/payment", ['amount' => 999999])
+            ->patch("/loans/{$loan->id}/payment", ['amount' => 500])
             ->assertRedirect();
 
         $loan->refresh();
         $this->assertEquals(0, $loan->remaining_amount);
         $this->assertEquals('paid', $loan->status);
+
+        $this->assertDatabaseHas('loan_payments', [
+            'loan_id' => $loan->id,
+            'amount' => 500,
+            'overpayment_amount' => 300,
+        ]);
     }
 
     public function test_full_payment_marks_loan_paid(): void
@@ -125,5 +137,25 @@ class LoanTest extends TestCase
         $this->actingAs($user)
             ->patch("/loans/{$loan->id}/payment", ['amount' => -50])
             ->assertSessionHasErrors('amount');
+    }
+
+    public function test_accrued_interest_is_calculated_correctly(): void
+    {
+        $user = User::factory()->create();
+
+        $loan = Loan::create([
+            'user_id' => $user->id,
+            'name' => 'Interest Bearing Loan',
+            'amount' => 10000,
+            'remaining_amount' => 10000,
+            'interest_rate' => 12.0,
+            'date_borrowed' => now()->subDays(30)->toDateString(),
+            'due_date' => now()->addMonths(6)->toDateString(),
+            'status' => 'active',
+        ]);
+
+        $this->assertGreaterThan(0, $loan->accrued_interest);
+        // 10000 * 0.12 * (30 / 365) = 98.63
+        $this->assertEquals(98.63, $loan->accrued_interest);
     }
 }

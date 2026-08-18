@@ -29,7 +29,40 @@ class FinancePerformanceTest extends TestCase
             ->get('/dashboard')
             ->assertOk();
 
-        $this->assertLessThanOrEqual(12, count(DB::getQueryLog()));
+        $this->assertLessThanOrEqual(8, count(DB::getQueryLog()));
+        DB::disableQueryLog();
+    }
+
+    public function test_ai_chat_query_count_is_bounded(): void
+    {
+        \Illuminate\Support\Facades\Http::fake([
+            '*' => \Illuminate\Support\Facades\Http::response([
+                'candidates' => [
+                    [
+                        'content' => [
+                            'parts' => [
+                                ['text' => "Summary: Budget is healthy.\nActions: 1. Keep saving."],
+                            ],
+                        ],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $user = User::factory()->create();
+        $this->seedFinanceData($user);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        $this->actingAs($user)
+            ->postJson('/ai/chat', [
+                'message' => 'How is my budget?',
+                'history' => [],
+            ])
+            ->assertOk();
+
+        $this->assertLessThanOrEqual(6, count(DB::getQueryLog()));
         DB::disableQueryLog();
     }
 
@@ -113,6 +146,70 @@ class FinancePerformanceTest extends TestCase
         DB::disableQueryLog();
     }
 
+    public function test_banks_query_count_is_bounded(): void
+    {
+        $user = User::factory()->create();
+        $this->seedFinanceData($user);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        $this->actingAs($user)
+            ->get('/banks')
+            ->assertOk();
+
+        $this->assertLessThanOrEqual(5, count(DB::getQueryLog()));
+        DB::disableQueryLog();
+    }
+
+    public function test_transactions_query_count_is_bounded(): void
+    {
+        $user = User::factory()->create();
+        $this->seedFinanceData($user);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        $this->actingAs($user)
+            ->get('/transactions')
+            ->assertOk();
+
+        $this->assertLessThanOrEqual(5, count(DB::getQueryLog()));
+        DB::disableQueryLog();
+    }
+
+    public function test_income_query_count_is_bounded(): void
+    {
+        $user = User::factory()->create();
+        $this->seedFinanceData($user);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        $this->actingAs($user)
+            ->get('/income')
+            ->assertOk();
+
+        $this->assertLessThanOrEqual(5, count(DB::getQueryLog()));
+        DB::disableQueryLog();
+    }
+
+    public function test_expenses_query_count_is_bounded(): void
+    {
+        $user = User::factory()->create();
+        $this->seedFinanceData($user);
+
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
+        $this->actingAs($user)
+            ->get('/expenses')
+            ->assertOk();
+
+        $this->assertLessThanOrEqual(5, count(DB::getQueryLog()));
+        DB::disableQueryLog();
+    }
+
     private function seedFinanceData(User $user): Category
     {
         $category = Category::create([
@@ -172,6 +269,14 @@ class FinancePerformanceTest extends TestCase
             'user_id' => $user->id,
             'amount' => 500,
             'frequency' => 'monthly',
+        ]);
+
+        \App\Models\BankAccount::create([
+            'user_id' => $user->id,
+            'bank_name' => 'MariBank',
+            'account_name' => 'Savings Account',
+            'balance' => 25000,
+            'account_type' => 'savings',
         ]);
 
         return $category;

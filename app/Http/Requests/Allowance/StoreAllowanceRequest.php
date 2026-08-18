@@ -21,4 +21,19 @@ class StoreAllowanceRequest extends FormRequest
             'frequency' => ['required', 'string', 'in:daily,weekly,monthly,yearly'],
         ];
     }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'amount.required' => 'Please enter an allowance amount.',
+            'amount.numeric' => 'The allowance amount must be a valid number.',
+            'amount.min' => 'The allowance amount must be at least ₱0.01.',
+            'amount.max' => 'The allowance amount cannot exceed ₱999,999,999.99.',
+            'frequency.required' => 'Please select a frequency interval.',
+            'frequency.in' => 'Frequency must be daily, weekly, monthly, or yearly.',
+        ];
+    }
 }

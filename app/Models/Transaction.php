@@ -2,12 +2,15 @@
 
 namespace App\Models;
 
+use App\Traits\OwnedByUser;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class Transaction extends Model
 {
+    use OwnedByUser;
+
     protected $fillable = ['user_id', 'category_id', 'amount', 'type', 'source', 'date', 'notes', 'is_spent'];
 
     protected $casts = [

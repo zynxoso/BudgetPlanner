@@ -31,4 +31,19 @@ class StoreBudgetRequest extends FormRequest
             'amount_limit' => ['required', 'numeric', 'min:0', 'max:999999999.99'],
         ];
     }
+
+    /**
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [
+            'category_id.required' => 'Please select a category for this budget.',
+            'category_id.exists' => 'The selected category does not exist.',
+            'amount_limit.required' => 'Please enter a monthly budget limit.',
+            'amount_limit.numeric' => 'The budget limit must be a valid number.',
+            'amount_limit.min' => 'The budget limit cannot be negative.',
+            'amount_limit.max' => 'The budget limit cannot exceed ₱999,999,999.99.',
+        ];
+    }
 }

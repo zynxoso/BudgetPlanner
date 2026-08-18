@@ -1,6 +1,24 @@
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
+function getXsrfCookie(): string | null {
+    if (typeof document === 'undefined') {
+        return null;
+    }
+    const match = document.cookie.match(/(^|;\s*)XSRF-TOKEN=([^;]+)/);
+    if (!match) {
+        return null;
+    }
+    try {
+        return decodeURIComponent(match[2]);
+    } catch {
+        return match[2];
+    }
+}
+
 function getCsrfToken(): string | null {
+    if (typeof document === 'undefined') {
+        return null;
+    }
     const meta = document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]');
     return meta?.content ?? null;
 }
@@ -26,15 +44,24 @@ function getErrorMessage(error: unknown): string {
 }
 
 export async function postJson<T>(url: string, body: unknown, options: { signal?: AbortSignal } = {}): Promise<T> {
-    const token = getCsrfToken();
+    const xsrfCookie = getXsrfCookie();
+    const metaToken = getCsrfToken();
+
+    const headers: Record<string, string> = {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+    };
+
+    if (xsrfCookie) {
+        headers['X-XSRF-TOKEN'] = xsrfCookie;
+    } else if (metaToken) {
+        headers['X-CSRF-TOKEN'] = metaToken;
+    }
 
     const response = await fetch(url, {
         method: 'POST',
-        headers: {
-            Accept: 'application/json',
-            'Content-Type': 'application/json',
-            ...(token ? { 'X-CSRF-TOKEN': token } : {}),
-        },
+        headers,
         credentials: 'same-origin',
         body: JSON.stringify(body ?? {}),
         signal: options.signal,
@@ -44,6 +71,10 @@ export async function postJson<T>(url: string, body: unknown, options: { signal?
     const data = parseJsonSafely(text);
 
     if (!response.ok) {
+        if (response.status === 419) {
+            throw new Error('Your session has expired. Please refresh the page and try again.');
+        }
+
         const message = (data && typeof data === 'object' && 'message' in data && typeof data.message === 'string')
             ? data.message
             : `Request failed (${response.status}).`;

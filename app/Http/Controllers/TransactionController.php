@@ -16,16 +16,7 @@ class TransactionController extends Controller
 {
     public function incomeIndex(): Response
     {
-        $incomes = Transaction::query()
-            ->select(['id', 'amount', 'type', 'source', 'date', 'notes', 'is_spent'])
-            ->where('user_id', Auth::id())
-            ->where('type', 'income')
-            ->orderByDesc('date')
-            ->get();
-
-        return Inertia::render('transactions/income', [
-            'incomes' => $incomes,
-        ]);
+        return $this->renderIndex('income');
     }
 
     public function storeIncome(StoreIncomeRequest $request): RedirectResponse
@@ -40,27 +31,7 @@ class TransactionController extends Controller
 
     public function expenseIndex(): Response
     {
-        $userId = Auth::id();
-
-        $expenses = Transaction::query()
-            ->select(['id', 'category_id', 'amount', 'type', 'date', 'notes'])
-            ->with('category:id,name')
-            ->where('user_id', $userId)
-            ->where('type', 'expense')
-            ->orderByDesc('date')
-            ->get();
-
-        $categories = Category::query()
-            ->select(['id', 'name'])
-            ->where(function ($query) use ($userId) {
-                $query->where('user_id', $userId)->orWhereNull('user_id');
-            })
-            ->get();
-
-        return Inertia::render('transactions/expenses', [
-            'expenses' => $expenses,
-            'categories' => $categories,
-        ]);
+        return $this->renderIndex('expense');
     }
 
     public function storeExpense(StoreExpenseRequest $request): RedirectResponse
@@ -75,14 +46,25 @@ class TransactionController extends Controller
 
     public function allIndex(): Response
     {
-        $userId = Auth::id();
+        return $this->renderIndex('all');
+    }
 
-        $transactions = Transaction::query()
-            ->select(['id', 'category_id', 'amount', 'type', 'source', 'date', 'notes', 'is_spent'])
-            ->with('category:id,name')
-            ->where('user_id', $userId)
-            ->orderByDesc('date')
-            ->paginate(15);
+    private function renderIndex(string $viewType): Response
+    {
+        $userId = (int) Auth::id();
+
+        if ($viewType === 'income') {
+            $incomes = Transaction::query()
+                ->select(['id', 'amount', 'type', 'source', 'date', 'notes', 'is_spent'])
+                ->where('user_id', $userId)
+                ->where('type', 'income')
+                ->orderByDesc('date')
+                ->get();
+
+            return Inertia::render('transactions/income', [
+                'incomes' => $incomes,
+            ]);
+        }
 
         $categories = Category::query()
             ->select(['id', 'name'])
@@ -90,6 +72,28 @@ class TransactionController extends Controller
                 $query->where('user_id', $userId)->orWhereNull('user_id');
             })
             ->get();
+
+        if ($viewType === 'expense') {
+            $expenses = Transaction::query()
+                ->select(['id', 'category_id', 'amount', 'type', 'date', 'notes'])
+                ->with('category:id,name')
+                ->where('user_id', $userId)
+                ->where('type', 'expense')
+                ->orderByDesc('date')
+                ->get();
+
+            return Inertia::render('transactions/expenses', [
+                'expenses' => $expenses,
+                'categories' => $categories,
+            ]);
+        }
+
+        $transactions = Transaction::query()
+            ->select(['id', 'category_id', 'amount', 'type', 'source', 'date', 'notes', 'is_spent'])
+            ->with('category:id,name')
+            ->where('user_id', $userId)
+            ->orderByDesc('date')
+            ->paginate(15);
 
         return Inertia::render('transactions/index', [
             'transactions' => $transactions,

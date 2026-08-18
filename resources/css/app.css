@@ -153,6 +153,261 @@
     }
 
     body {
-        @apply bg-background text-foreground;
+        @apply bg-background text-foreground antialiased selection:bg-zinc-900 selection:text-zinc-50 dark:selection:bg-zinc-100 dark:selection:text-zinc-900;
     }
 }
+
+/* Motion Graphics & Animation Design Tokens */
+@keyframes fadeInUp {
+    0% {
+        opacity: 0;
+        transform: translateY(14px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes revealUp {
+    0% {
+        opacity: 0;
+        transform: translateY(28px);
+        filter: blur(4px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+        filter: blur(0);
+    }
+}
+
+@keyframes revealScale {
+    0% {
+        opacity: 0;
+        transform: scale(0.92) translateY(16px);
+        filter: blur(6px);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+        filter: blur(0);
+    }
+}
+
+@keyframes slideDownIn {
+    0% {
+        opacity: 0;
+        transform: translateY(-24px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes scaleInSpring {
+    0% {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+    70% {
+        transform: scale(1.01);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes floatGentle {
+    0%, 100% {
+        transform: translateY(0px);
+    }
+    50% {
+        transform: translateY(-6px);
+    }
+}
+
+@keyframes shimmerSweep {
+    0% {
+        background-position: -200% 0;
+    }
+    100% {
+        background-position: 200% 0;
+    }
+}
+
+@keyframes pulseGlow {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.65;
+        transform: scale(1.08);
+    }
+}
+
+/* Utility Animation Classes */
+.animate-fade-in-up {
+    animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-reveal-up {
+    animation: revealUp 0.75s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-reveal-scale {
+    animation: revealScale 0.85s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slide-down {
+    animation: slideDownIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-scale-in {
+    animation: scaleInSpring 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-float {
+    animation: floatGentle 4s ease-in-out infinite;
+}
+
+.animate-shimmer {
+    background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.08) 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: shimmerSweep 2.5s infinite linear;
+}
+
+.animate-pulse-glow {
+    animation: pulseGlow 2s ease-in-out infinite;
+}
+
+/* Staggered Delay Utilities for Entrance Orchestration */
+.delay-100 { animation-delay: 100ms; }
+.delay-200 { animation-delay: 200ms; }
+.delay-300 { animation-delay: 300ms; }
+.delay-400 { animation-delay: 400ms; }
+.delay-500 { animation-delay: 500ms; }
+.delay-600 { animation-delay: 600ms; }
+.delay-700 { animation-delay: 700ms; }
+.delay-800 { animation-delay: 800ms; }
+
+/* Interactive Micro-Interactions */
+.card-interactive {
+    transition: border-color 0.2s ease;
+}
+
+.btn-interactive {
+    transition: opacity 0.18s ease, background-color 0.18s ease;
+}
+
+/* Browser surface theming: visible focus rings and themed scrollbars for the landing page */
+:focus-visible {
+    outline: 2px solid var(--foreground);
+    outline-offset: 2px;
+    border-radius: calc(var(--radius) - 2px);
+}
+
+button:focus-visible,
+a:focus-visible,
+[role='button']:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: 2px solid var(--foreground);
+    outline-offset: 2px;
+    border-radius: calc(var(--radius) - 2px);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    html {
+        scrollbar-width: thin;
+        scrollbar-color: color-mix(in oklch, var(--foreground) 25%, transparent) transparent;
+    }
+}
+
+body::-webkit-scrollbar,
+html::-webkit-scrollbar {
+    width: 10px;
+}
+
+body::-webkit-scrollbar-track,
+html::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+body::-webkit-scrollbar-thumb,
+html::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--foreground) 25%, transparent);
+    border-radius: 8px;
+}
+
+body::-webkit-scrollbar-thumb:hover,
+html::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklch, var(--foreground) 40%, transparent);
+}
+
+/* Selection theme for the landing page */
+::selection {
+    background: color-mix(in oklch, var(--foreground) 15%, transparent);
+}
+
+.dark ::selection {
+    background: color-mix(in oklch, var(--foreground) 20%, transparent);
+}
+
+/* Respect users who prefer reduced motion: keep meaningful state feedback, remove spatial choreography */
+@media (prefers-reduced-motion: reduce) {
+    :root {
+        --animate-duration: 0.001ms !important;
+    }
+
+    .animate-fade-in-up,
+    .animate-reveal-up,
+    .animate-reveal-scale,
+    .animate-slide-down,
+    .animate-scale-in {
+        animation: none !important;
+        opacity: 1 !important;
+        transform: none !important;
+        filter: none !important;
+    }
+
+    .animate-float,
+    .animate-shimmer,
+    .animate-pulse-glow,
+    .animate-bounce {
+        animation: none !important;
+    }
+
+    * {
+        transition-duration: 0.001ms !important;
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+    }
+
+    [class*='animate-'] {
+        will-change: auto !important;
+    }
+}
+
+/* Lenis Smooth Inertial Scroll Styles */
+html.lenis, html.lenis body {
+    height: auto;
+}
+.lenis.lenis-smooth {
+    scroll-behavior: auto !important;
+}
+.lenis.lenis-smooth [data-lenis-prevent] {
+    overscroll-behavior: contain;
+}
+.lenis.lenis-stopped {
+    overflow: hidden;
+}
+.lenis.lenis-scrolling iframe {
+    pointer-events: none;
+}
+

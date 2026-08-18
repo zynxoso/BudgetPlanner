@@ -24,7 +24,11 @@ Homestead.yaml
 npm-debug.log
 yarn-error.log
 
-graphify
-graphify-out
+.github
+archify
+stubs
+boost.json
+database_backup.sql
+
 .github
 {1B5564E7-A508-42F8-8DDF-7B6F40EFB4FD}.png
